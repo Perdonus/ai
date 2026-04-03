@@ -116,6 +116,22 @@ h2 {
   gap: 1rem;
 }
 
+.toggle-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.toggle {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.toggle input {
+  width: auto;
+}
+
 .tool-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -138,6 +154,25 @@ h2 {
 .widget-form {
   display: grid;
   gap: 1rem;
+}
+
+.routes-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.route-card {
+  display: grid;
+  gap: 0.8rem;
+  border-radius: 20px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.route-card--disabled {
+  opacity: 0.58;
 }
 
 .widget-form {
@@ -206,7 +241,8 @@ h2 {
 
   .grid,
   .settings-grid,
-  .widget-form {
+  .widget-form,
+  .routes-grid {
     grid-template-columns: 1fr;
   }
 

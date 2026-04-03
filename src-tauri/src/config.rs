@@ -2,42 +2,109 @@ use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppConfig {
-    pub base_url: String,
-    pub api_key: String,
-    pub text_model: String,
-    pub vision_model: String,
-    pub weather_location: String,
-    pub weather_units: Units,
-    pub max_steps: u8,
-    pub confirmation_policy: ConfirmationPolicy,
+#[serde(rename_all = "snake_case")]
+pub enum ProviderKind {
+    SosiskiBot,
+    OpenAi,
+    OpenRouter,
+    Gemini,
+    Mistral,
+    HuggingFace,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelRoute {
+    pub provider: ProviderKind,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConfig {
+    #[serde(default = "default_text_route")]
+    pub text_route: ModelRoute,
+    #[serde(default)]
+    pub use_separate_vision: bool,
+    #[serde(default = "default_vision_route")]
+    pub vision_route: ModelRoute,
+    #[serde(default)]
+    pub use_separate_ocr: bool,
+    #[serde(default = "default_ocr_route")]
+    pub ocr_route: ModelRoute,
+    #[serde(default = "default_weather_location")]
+    pub weather_location: String,
+    #[serde(default)]
+    pub weather_units: Units,
+    #[serde(default = "default_max_steps")]
+    pub max_steps: u8,
+    #[serde(default)]
+    pub confirmation_policy: ConfirmationPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Units {
+    #[default]
     Metric,
     Imperial,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ConfirmationPolicy {
     Auto,
+    #[default]
     Ask,
     Block,
+}
+
+fn default_weather_location() -> String {
+    "Moscow".to_string()
+}
+
+fn default_max_steps() -> u8 {
+    12
+}
+
+fn default_text_route() -> ModelRoute {
+    ModelRoute {
+        provider: ProviderKind::SosiskiBot,
+        base_url: "https://sosiskibot.ru/v1".to_string(),
+        api_key: String::new(),
+        model: "gpt-4o-mini".to_string(),
+    }
+}
+
+fn default_vision_route() -> ModelRoute {
+    ModelRoute {
+        provider: ProviderKind::SosiskiBot,
+        base_url: "https://sosiskibot.ru/v1".to_string(),
+        api_key: String::new(),
+        model: String::new(),
+    }
+}
+
+fn default_ocr_route() -> ModelRoute {
+    ModelRoute {
+        provider: ProviderKind::SosiskiBot,
+        base_url: "https://sosiskibot.ru/v1".to_string(),
+        api_key: String::new(),
+        model: String::new(),
+    }
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            base_url: "https://sosiskibot.ru/v1".to_string(),
-            api_key: String::new(),
-            text_model: "gpt-4o-mini".to_string(),
-            vision_model: "gpt-4o".to_string(),
-            weather_location: "Moscow".to_string(),
+            text_route: default_text_route(),
+            use_separate_vision: false,
+            vision_route: default_vision_route(),
+            use_separate_ocr: false,
+            ocr_route: default_ocr_route(),
+            weather_location: default_weather_location(),
             weather_units: Units::Metric,
-            max_steps: 12,
+            max_steps: default_max_steps(),
             confirmation_policy: ConfirmationPolicy::Ask,
         }
     }

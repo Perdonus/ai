@@ -1,15 +1,36 @@
 import { FormEvent, useEffect, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
-type AppConfig = {
+type ProviderKind =
+  | "sosiski_bot"
+  | "open_ai"
+  | "open_router"
+  | "gemini"
+  | "mistral"
+  | "hugging_face";
+
+type ModelRoute = {
+  provider: ProviderKind;
   base_url: string;
   api_key: string;
-  text_model: string;
-  vision_model: string;
+  model: string;
+};
+
+type AppConfig = {
+  text_route: ModelRoute;
+  use_separate_vision: boolean;
+  vision_route: ModelRoute;
+  use_separate_ocr: boolean;
+  ocr_route: ModelRoute;
   weather_location: string;
   weather_units: "metric" | "imperial";
   max_steps: number;
   confirmation_policy: "auto" | "ask" | "block";
+};
+
+type ModelOption = {
+  id: string;
+  label: string;
 };
 
 type AgentStatus = {
@@ -44,11 +65,37 @@ type ScreenCapture = {
   height: number;
 };
 
-const fallbackConfig: AppConfig = {
-  base_url: "https://sosiskibot.ru/v1",
+const providerLabels: Record<ProviderKind, string> = {
+  sosiski_bot: "SosiskiBot",
+  open_ai: "OpenAI",
+  open_router: "OpenRouter",
+  gemini: "Gemini",
+  mistral: "Mistral",
+  hugging_face: "Hugging Face"
+};
+
+const providerDefaults: Record<ProviderKind, string> = {
+  sosiski_bot: "https://sosiskibot.ru/v1",
+  open_ai: "https://api.openai.com/v1",
+  open_router: "https://openrouter.ai/api/v1",
+  gemini: "https://generativelanguage.googleapis.com/v1beta",
+  mistral: "https://api.mistral.ai/v1",
+  hugging_face: "https://router.huggingface.co/v1"
+};
+
+const emptyRoute = (provider: ProviderKind): ModelRoute => ({
+  provider,
+  base_url: providerDefaults[provider],
   api_key: "",
-  text_model: "gpt-4o-mini",
-  vision_model: "gpt-4o",
+  model: ""
+});
+
+const fallbackConfig: AppConfig = {
+  text_route: { ...emptyRoute("sosiski_bot"), model: "gpt-4o-mini" },
+  use_separate_vision: false,
+  vision_route: emptyRoute("gemini"),
+  use_separate_ocr: false,
+  ocr_route: emptyRoute("mistral"),
   weather_location: "Moscow",
   weather_units: "metric",
   max_steps: 12,
@@ -64,6 +111,9 @@ export default function App() {
   const [widgetName, setWidgetName] = useState("");
   const [capture, setCapture] = useState<ScreenCapture | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(true);
+  const [textModels, setTextModels] = useState<ModelOption[]>([]);
+  const [visionModels, setVisionModels] = useState<ModelOption[]>([]);
+  const [ocrModels, setOcrModels] = useState<ModelOption[]>([]);
 
   useEffect(() => {
     void refreshAll();
@@ -112,11 +162,103 @@ export default function App() {
   async function installWidget(event: FormEvent) {
     event.preventDefault();
     if (!widgetName.trim()) return;
-    await invoke("install_widget_from_github", {
-      widget_name: widgetName
-    });
+    await invoke("install_widget_from_github", { widget_name: widgetName });
     setWidgetName("");
     await refreshWidgets();
+  }
+
+  async function loadModels(kind: "text" | "vision" | "ocr") {
+    const route =
+      kind === "text" ? config.text_route : kind === "vision" ? config.vision_route : config.ocr_route;
+    const models = await invoke<ModelOption[]>("list_models", { route });
+    if (kind === "text") setTextModels(models);
+    if (kind === "vision") setVisionModels(models);
+    if (kind === "ocr") setOcrModels(models);
+  }
+
+  function updateRoute(kind: "text" | "vision" | "ocr", next: Partial<ModelRoute>) {
+    const key = kind === "text" ? "text_route" : kind === "vision" ? "vision_route" : "ocr_route";
+    const current = config[key];
+    setConfig({ ...config, [key]: { ...current, ...next } });
+  }
+
+  function routeEditor(
+    title: string,
+    route: ModelRoute,
+    models: ModelOption[],
+    kind: "text" | "vision" | "ocr",
+    enabled = true
+  ) {
+    return (
+      <section className={`route-card ${enabled ? "" : "route-card--disabled"}`}>
+        <div className="row">
+          <div>
+            <p className="eyebrow">{title}</p>
+            <h3>{providerLabels[route.provider]}</h3>
+          </div>
+          <button className="ghost" type="button" onClick={() => void loadModels(kind)} disabled={!enabled}>
+            Загрузить модели
+          </button>
+        </div>
+        <label>
+          Provider
+          <select
+            value={route.provider}
+            disabled={!enabled}
+            onChange={(event) => {
+              const provider = event.target.value as ProviderKind;
+              updateRoute(kind, { provider, base_url: providerDefaults[provider] });
+            }}
+          >
+            {Object.entries(providerLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Base URL
+          <input
+            value={route.base_url}
+            disabled={!enabled}
+            onChange={(event) => updateRoute(kind, { base_url: event.target.value })}
+          />
+        </label>
+        <label>
+          API key
+          <input
+            type="password"
+            value={route.api_key}
+            disabled={!enabled}
+            onChange={(event) => updateRoute(kind, { api_key: event.target.value })}
+          />
+        </label>
+        <label>
+          Model
+          <select
+            value={route.model}
+            disabled={!enabled}
+            onChange={(event) => updateRoute(kind, { model: event.target.value })}
+          >
+            <option value="">Выбери модель</option>
+            {models.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Или впиши модель вручную
+          <input
+            value={route.model}
+            disabled={!enabled}
+            onChange={(event) => updateRoute(kind, { model: event.target.value })}
+          />
+        </label>
+      </section>
+    );
   }
 
   return (
@@ -124,10 +266,10 @@ export default function App() {
       <section className="panel hero">
         <div>
           <p className="eyebrow">Desktop AI Agent</p>
-          <h1>Агент с глазами, руками и runtime-виджетами</h1>
+          <h1>Мультипровайдерный агент с text, vision и OCR</h1>
           <p className="muted">
-            Каждый шаг может смотреть экран, двигать мышь, зажимать кнопки, печатать,
-            гонять shell и ставить виджеты из нашей widget-ветки без ребилда.
+            Теперь можно отдельно выбрать текстовую, вижн и OCR-модель: хоть GPT через
+            SosiskiBot, vision через Gemini, а OCR через Mistral.
           </p>
         </div>
         <button className="ghost" onClick={() => setSettingsOpen((value) => !value)}>
@@ -144,7 +286,7 @@ export default function App() {
             id="prompt"
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Открой браузер, зайди в нужный репозиторий, собери проект, если нужен виджет — найди его в widget-ветке и установи."
+            placeholder="Используй text через GPT 5.4, vision через Gemini, OCR через Mistral и решай задачу по шагам."
             rows={8}
           />
           <div className="row">
@@ -156,12 +298,12 @@ export default function App() {
             </button>
           </div>
           <div className="tool-grid">
-            <span>Screen Vision</span>
-            <span>Mouse Down/Up</span>
-            <span>Mouse Drag</span>
-            <span>Key Down/Up</span>
-            <span>Type Text</span>
-            <span>Shell + Git</span>
+            <span>Multi API</span>
+            <span>Vision fallback</span>
+            <span>OCR fallback</span>
+            <span>Model lists</span>
+            <span>Mouse drag</span>
+            <span>Type text</span>
           </div>
         </form>
 
@@ -181,9 +323,6 @@ export default function App() {
           <p className="muted">{weather?.description ?? "Нет данных"}</p>
           <p className="caption">
             Ветер: {weather?.wind_speed_kmh == null ? "--" : `${weather.wind_speed_kmh} км/ч`}
-          </p>
-          <p className="caption">
-            {weather?.stale ? "Показан кэш." : "Актуально."} {weather?.updated_at ?? ""}
           </p>
         </section>
       </section>
@@ -206,8 +345,7 @@ export default function App() {
           <p className="eyebrow">Input</p>
           <h2>Low-level automation</h2>
           <p className="muted">
-            В backend теперь есть `mouse_down`, `mouse_up`, `hold`, `drag`, `key_down`,
-            `key_up`, `key_press`, `key_hold` и `type_text`.
+            Мышь и клавиатура поддерживают down, up, hold, drag, combos и type_text.
           </p>
         </section>
       </section>
@@ -269,40 +407,41 @@ export default function App() {
           <div className="row">
             <div>
               <p className="eyebrow">Настройки ИИ</p>
-              <h2>Провайдер, модели и шаги</h2>
+              <h2>Маршруты моделей и fallback-флажки</h2>
             </div>
             <button type="submit">Сохранить</button>
           </div>
+
+          <div className="toggle-row">
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={config.use_separate_vision}
+                onChange={(event) =>
+                  setConfig({ ...config, use_separate_vision: event.target.checked })
+                }
+              />
+              <span>Вижн модель отдельно</span>
+            </label>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={config.use_separate_ocr}
+                onChange={(event) =>
+                  setConfig({ ...config, use_separate_ocr: event.target.checked })
+                }
+              />
+              <span>OCR модель отдельно</span>
+            </label>
+          </div>
+
+          <div className="routes-grid">
+            {routeEditor("Text Route", config.text_route, textModels, "text", true)}
+            {routeEditor("Vision Route", config.vision_route, visionModels, "vision", config.use_separate_vision)}
+            {routeEditor("OCR Route", config.ocr_route, ocrModels, "ocr", config.use_separate_ocr)}
+          </div>
+
           <div className="settings-grid">
-            <label>
-              Base URL
-              <input
-                value={config.base_url}
-                onChange={(event) => setConfig({ ...config, base_url: event.target.value })}
-              />
-            </label>
-            <label>
-              API key
-              <input
-                type="password"
-                value={config.api_key}
-                onChange={(event) => setConfig({ ...config, api_key: event.target.value })}
-              />
-            </label>
-            <label>
-              Text model
-              <input
-                value={config.text_model}
-                onChange={(event) => setConfig({ ...config, text_model: event.target.value })}
-              />
-            </label>
-            <label>
-              Vision model
-              <input
-                value={config.vision_model}
-                onChange={(event) => setConfig({ ...config, vision_model: event.target.value })}
-              />
-            </label>
             <label>
               Weather location
               <input

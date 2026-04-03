@@ -8,7 +8,7 @@ mod widgets;
 
 use crate::{
     automation::{keyboard_action, keyboard_combo, KeyboardActionRequest, mouse_action, MouseActionRequest},
-    config::{load_config as read_config_file, save_config as write_config_file, AppConfig},
+    config::{load_config as read_config_file, save_config as write_config_file, AppConfig, ModelRoute},
     provider::{AgentAction, AgentActionKind},
     screen::ScreenCapture,
     tools::CommandResult,
@@ -204,6 +204,11 @@ async fn execute_action(state: &SharedState, _config: &AppConfig, action: AgentA
 #[tauri::command]
 fn load_config(state: State<'_, Arc<SharedState>>) -> Result<AppConfig, String> {
     Ok(state.config.lock().map_err(|e| e.to_string())?.clone())
+}
+
+#[tauri::command]
+async fn list_models(route: ModelRoute) -> Result<Vec<provider::ModelOption>, String> {
+    provider::list_models(&route).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -499,6 +504,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             load_config,
+            list_models,
             save_config,
             agent_status,
             capture_screen,
