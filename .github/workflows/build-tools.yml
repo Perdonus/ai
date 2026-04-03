@@ -1,0 +1,45 @@
+name: build-tools
+
+on:
+  push:
+    branches: ["tools"]
+    paths:
+      - "tools/**"
+      - "tools-catalog.json"
+      - ".github/workflows/build-tools.yml"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  package-tools:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate and package tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path tool-dist | Out-Null
+          $tools = Get-ChildItem tools -Directory
+          foreach ($tool in $tools) {
+            $manifestPath = Join-Path $tool.FullName 'tool.json'
+            if (!(Test-Path $manifestPath)) { continue }
+            $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+            if ($manifest.kind -eq 'power_shell') {
+              $entry = Join-Path $tool.FullName $manifest.entry
+              if (!(Test-Path $entry)) { throw "Missing PowerShell entry for $($tool.Name): $entry" }
+            }
+            Compress-Archive -Path (Join-Path $tool.FullName '*') -DestinationPath (Join-Path 'tool-dist' ($tool.Name + '.zip')) -Force
+          }
+
+      - name: Upload tool artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tools-packages
+          path: tool-dist/*.zip
+          if-no-files-found: error

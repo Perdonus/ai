@@ -17,7 +17,8 @@ Windows-only desktop agent scaffold on `Tauri v2 + Rust + React`.
 - runtime widget loading from local folders or the `Perdonus/ai` `widgets` branch
 - runtime tool loading from local folders or the `Perdonus/ai` `tools` branch
 - separate `text`, `analysis`, `vision`, `ocr` model routes with fallback flags
-- GitHub Actions uploads the Windows app artifact and build logs
+- separate GitHub Actions workflows for app, widgets and tools
+- GitHub Actions uploads the Windows app artifact plus separate widget/tool package artifacts
 
 ## Missing before production
 
@@ -71,6 +72,10 @@ widgets/<widget-name>/
 
 inside the target repository branch.
 
+Widget base index:
+
+- `widgets-catalog.json`
+
 ## Runtime tools
 
 Runtime tools are loaded from:
@@ -83,3 +88,7 @@ Remote installation expects tools to be published in the `tools` branch of `http
 ```text
 tools/<tool-name>/
 ```
+
+Tool base index:
+
+- `tools-catalog.json`

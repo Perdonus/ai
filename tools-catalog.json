@@ -1,0 +1,11 @@
+{
+  "branch": "tools",
+  "items": [
+    {
+      "id": "open-terminal",
+      "name": "Open Terminal",
+      "description": "Open PowerShell in a target folder.",
+      "folder": "tools/open-terminal"
+    }
+  ]
+}

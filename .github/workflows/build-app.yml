@@ -1,8 +1,13 @@
-name: build
+name: build-app
 
 on:
   push:
     branches: ["main"]
+    paths-ignore:
+      - "widgets/**"
+      - "tools/**"
+      - "widgets-catalog.json"
+      - "tools-catalog.json"
   workflow_dispatch:
 
 env:
@@ -58,14 +63,15 @@ jobs:
             src-tauri/target/release/*.pdb
           if-no-files-found: error
 
-      - name: Upload build logs
+      - name: Upload app build logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs
+          name: app-build-logs
           path: |
             npm-install.log
             frontend-build.log
             cargo-check.log
             cargo-build.log
           if-no-files-found: warn
+

@@ -1,0 +1,44 @@
+name: build-widgets
+
+on:
+  push:
+    branches: ["widgets"]
+    paths:
+      - "widgets/**"
+      - "widgets-catalog.json"
+      - ".github/workflows/build-widgets.yml"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  package-widgets:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate and package widgets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path widget-dist | Out-Null
+          $widgets = Get-ChildItem widgets -Directory
+          foreach ($widget in $widgets) {
+            $manifestPath = Join-Path $widget.FullName 'widget.json'
+            if (!(Test-Path $manifestPath)) { throw "Missing widget.json for $($widget.Name)" }
+            $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+            $entry = Join-Path $widget.FullName $manifest.entry_html
+            if (!(Test-Path $entry)) { throw "Missing entry_html target for $($widget.Name): $entry" }
+            Compress-Archive -Path (Join-Path $widget.FullName '*') -DestinationPath (Join-Path 'widget-dist' ($widget.Name + '.zip')) -Force
+          }
+
+      - name: Upload widget artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: widgets-packages
+          path: widget-dist/*.zip
+          if-no-files-found: error
+

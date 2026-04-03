@@ -1,0 +1,12 @@
+{
+  "branch": "widgets",
+  "items": [
+    {
+      "id": "sample-status",
+      "name": "Sample Status",
+      "description": "Minimal runtime widget example.",
+      "folder": "widgets/sample-status"
+    }
+  ]
+}
+
