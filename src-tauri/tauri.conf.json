@@ -29,7 +29,6 @@
   "bundle": {
     "active": true,
     "targets": "msi",
-    "icon": []
+    "icon": ["icons/icon.ico"]
   }
 }
-
