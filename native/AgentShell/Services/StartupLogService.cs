@@ -4,8 +4,7 @@ public static class StartupLogService
 {
     private static readonly object Sync = new();
 
-    public static string LogDirectory =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DesktopAIAgent", "logs");
+    public static string LogDirectory => Path.Combine(AppContext.BaseDirectory, "logs");
 
     public static string StartupLogPath => Path.Combine(LogDirectory, "startup.log");
 
