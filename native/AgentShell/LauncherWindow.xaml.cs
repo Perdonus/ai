@@ -15,13 +15,16 @@ public sealed partial class LauncherWindow : Window
     public LauncherWindow()
     {
         InitializeComponent();
+        StartupLogService.Info("LauncherWindow initialized.");
 
         _visuals = new WindowVisualService(this, ShellPanel);
         _visuals.InitializeLauncherChrome();
         _visuals.MoveTopRight(false);
+        StartupLogService.Info("Launcher visuals initialized.");
 
         _hotkey = new GlobalHotkeyService(this, 7001, 0xA3);
         _hotkey.HotkeyPressed += async (_, _) => await ToggleAsync();
+        StartupLogService.Info("Global hotkey registered for Right Ctrl.");
 
         Activated += LauncherWindow_Activated;
     }
@@ -40,6 +43,7 @@ public sealed partial class LauncherWindow : Window
 
     public async Task ShowAnimatedAsync()
     {
+        StartupLogService.Info("Showing launcher.");
         _ignoreNextDeactivation = true;
         ShowWindow(WindowNative.GetWindowHandle(this), 5);
         await _visuals.AnimateAsync(show: true);
@@ -50,6 +54,7 @@ public sealed partial class LauncherWindow : Window
 
     public void HideAnimated(bool immediate = false)
     {
+        StartupLogService.Info(immediate ? "Hiding launcher immediately." : "Hiding launcher.");
         if (!_isVisible && !immediate)
         {
             return;
@@ -115,7 +120,8 @@ public sealed partial class LauncherWindow : Window
             return;
         }
 
-        if (prompt.Contains("настрой", StringComparison.OrdinalIgnoreCase) ||
+        StartupLogService.Info($"Prompt submitted: {prompt}");
+        if (prompt.Contains("\u043d\u0430\u0441\u0442\u0440\u043e\u0439", StringComparison.OrdinalIgnoreCase) ||
             prompt.Contains("settings", StringComparison.OrdinalIgnoreCase))
         {
             App.ShowSettings();
