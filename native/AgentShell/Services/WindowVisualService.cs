@@ -9,6 +9,11 @@ namespace AgentShell.Services;
 
 public sealed class WindowVisualService(Window window, FrameworkElement animatedRoot)
 {
+    private const int LauncherWidth = 468;
+    private const int LauncherHeight = 108;
+    private const int VisibleMargin = 16;
+    private const int HiddenOffset = 36;
+
     private readonly Window _window = window;
     private readonly FrameworkElement _animatedRoot = animatedRoot;
     private readonly AppWindow _appWindow = AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowNative.GetWindowHandle(window)));
@@ -24,16 +29,28 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
             presenter.IsMinimizable = false;
         }
 
-        _appWindow.Resize(new SizeInt32(468, 108));
+        _appWindow.Resize(new SizeInt32(LauncherWidth, LauncherHeight));
+        StartupLogService.Info($"Launcher chrome initialized with size {LauncherWidth}x{LauncherHeight}.");
     }
 
     public void MoveTopRight(bool visible)
     {
         var displayArea = DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary);
         var workArea = displayArea.WorkArea;
-        var x = visible ? workArea.X + workArea.Width - 488 : workArea.X + workArea.Width + 36;
-        var y = workArea.Y + 16;
+        var width = Math.Max(_appWindow.Size.Width, LauncherWidth);
+        var height = Math.Max(_appWindow.Size.Height, LauncherHeight);
+        var visibleX = workArea.X + workArea.Width - width - VisibleMargin;
+        var hiddenX = workArea.X + workArea.Width + HiddenOffset;
+        var maxVisibleX = workArea.X + Math.Max(0, workArea.Width - width);
+        var x = visible
+            ? Math.Clamp(visibleX, workArea.X, maxVisibleX)
+            : hiddenX;
+        var maxY = workArea.Y + Math.Max(0, workArea.Height - height);
+        var y = Math.Clamp(workArea.Y + VisibleMargin, workArea.Y, maxY);
+
         _appWindow.Move(new PointInt32(x, y));
+        StartupLogService.Info(
+            $"Launcher moved. visible={visible}; workArea={workArea.X},{workArea.Y},{workArea.Width},{workArea.Height}; size={width}x{height}; target={x},{y}");
     }
 
     public async Task AnimateAsync(bool show)
