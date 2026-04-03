@@ -2,6 +2,7 @@ use crate::config::app_data_dir;
 use anyhow::{anyhow, Result};
 use image::{ImageBuffer, Rgba};
 use serde::Serialize;
+use std::ptr::null_mut;
 use std::path::PathBuf;
 use uuid::Uuid;
 use windows::Win32::Foundation::HWND;
@@ -30,22 +31,22 @@ pub fn capture_primary_screen() -> Result<ScreenCapture> {
         return Err(anyhow!("Invalid screen size"));
     }
 
-    let screen_dc = unsafe { GetDC(HWND(0)) };
-    if screen_dc.0 == 0 {
+    let screen_dc = unsafe { GetDC(HWND(null_mut())) };
+    if screen_dc.0.is_null() {
         return Err(anyhow!("GetDC failed"));
     }
 
     let memory_dc = unsafe { CreateCompatibleDC(screen_dc) };
-    if memory_dc.0 == 0 {
-        unsafe { ReleaseDC(HWND(0), screen_dc) };
+    if memory_dc.0.is_null() {
+        unsafe { ReleaseDC(HWND(null_mut()), screen_dc) };
         return Err(anyhow!("CreateCompatibleDC failed"));
     }
 
     let bitmap = unsafe { CreateCompatibleBitmap(screen_dc, width, height) };
-    if bitmap.0 == 0 {
+    if bitmap.0.is_null() {
         unsafe {
             DeleteDC(memory_dc);
-            ReleaseDC(HWND(0), screen_dc);
+            ReleaseDC(HWND(null_mut()), screen_dc);
         }
         return Err(anyhow!("CreateCompatibleBitmap failed"));
     }
@@ -53,10 +54,10 @@ pub fn capture_primary_screen() -> Result<ScreenCapture> {
     unsafe {
         SelectObject(memory_dc, HGDIOBJ(bitmap.0));
         let copied = BitBlt(memory_dc, 0, 0, width, height, screen_dc, 0, 0, SRCCOPY);
-        if !copied.as_bool() {
+        if copied.is_err() {
             DeleteObject(HGDIOBJ(bitmap.0));
             DeleteDC(memory_dc);
-            ReleaseDC(HWND(0), screen_dc);
+            ReleaseDC(HWND(null_mut()), screen_dc);
             return Err(anyhow!("BitBlt failed"));
         }
     }
@@ -89,7 +90,7 @@ pub fn capture_primary_screen() -> Result<ScreenCapture> {
     unsafe {
         DeleteObject(HGDIOBJ(bitmap.0));
         DeleteDC(memory_dc);
-        ReleaseDC(HWND(0), screen_dc);
+        ReleaseDC(HWND(null_mut()), screen_dc);
     }
 
     if copied == 0 {

@@ -24,7 +24,6 @@ use tauri::{
     AppHandle, Manager, State, WindowEvent,
 };
 use tauri_plugin_autostart::MacosLauncher;
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -474,25 +473,29 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             build_tray(app.handle())?;
+            app.handle().plugin(
+                tauri_plugin_global_shortcut::Builder::new()
+                    .with_shortcuts(["AltRight"])?
+                    .with_handler(|app, _shortcut, event| {
+                        use tauri_plugin_global_shortcut::ShortcutState;
+                        if event.state == ShortcutState::Pressed {
+                            if let Some(window) = app.get_webview_window("main") {
+                                if window.is_visible().unwrap_or(true) {
+                                    let _ = window.hide();
+                                } else {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                        }
+                    })
+                    .build(),
+            )?;
             let window = app.get_webview_window("main").expect("main window");
             let _ = window.set_always_on_top(true);
-
-            let handle = app.handle().clone();
-            let shortcuts = app.global_shortcut();
-            shortcuts.register("AltRight", move || {
-                if let Some(window) = handle.get_webview_window("main") {
-                    if window.is_visible().unwrap_or(true) {
-                        let _ = window.hide();
-                    } else {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                }
-            })?;
 
             Ok(())
         })
