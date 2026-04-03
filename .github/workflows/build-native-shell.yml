@@ -27,13 +27,13 @@ jobs:
       - name: Restore native shell
         shell: pwsh
         run: |
-          msbuild native/AgentShell/AgentShell.csproj /restore /p:Configuration=Release /p:Platform=x64 *>&1 | Tee-Object -FilePath native-restore.log
+          msbuild native/AgentShell/AgentShell.csproj /restore /p:Configuration=Release /p:Platform=x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true *>&1 | Tee-Object -FilePath native-restore.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build native shell
         shell: pwsh
         run: |
-          msbuild native/AgentShell/AgentShell.csproj /p:Configuration=Release /p:Platform=x64 *>&1 | Tee-Object -FilePath native-build.log
+          msbuild native/AgentShell/AgentShell.csproj /p:Configuration=Release /p:Platform=x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true *>&1 | Tee-Object -FilePath native-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Add simple uninstall script
