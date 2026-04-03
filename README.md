@@ -15,6 +15,9 @@ Windows-only desktop agent scaffold on `Tauri v2 + Rust + React`.
 - native mouse and keyboard input via `SendInput`
 - git/clone/download commands
 - runtime widget loading from local folders or the `Perdonus/ai` `widgets` branch
+- runtime tool loading from local folders or the `Perdonus/ai` `tools` branch
+- separate `text`, `analysis`, `vision`, `ocr` model routes with fallback flags
+- GitHub Actions uploads the Windows app artifact and build logs
 
 ## Missing before production
 
@@ -67,3 +70,16 @@ widgets/<widget-name>/
 ```
 
 inside the target repository branch.
+
+## Runtime tools
+
+Runtime tools are loaded from:
+
+- `Z:\ai\tools`
+- `%APPDATA%/DesktopAIAgent/tools`
+
+Remote installation expects tools to be published in the `tools` branch of `https://github.com/Perdonus/ai`, under:
+
+```text
+tools/<tool-name>/
+```

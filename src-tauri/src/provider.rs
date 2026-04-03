@@ -20,6 +20,8 @@ pub enum AgentActionKind {
     GitCommand,
     DownloadFile,
     InstallWidgetFromGithub,
+    InstallToolFromGithub,
+    RunInstalledTool,
     MouseAction,
     KeyboardCombo,
     KeyboardAction,
@@ -153,6 +155,14 @@ fn route_for_vision(config: &AppConfig) -> &ModelRoute {
     }
 }
 
+fn route_for_analysis(config: &AppConfig) -> &ModelRoute {
+    if config.use_separate_analysis && !config.analysis_route.model.trim().is_empty() {
+        &config.analysis_route
+    } else {
+        &config.text_route
+    }
+}
+
 fn route_for_ocr(config: &AppConfig) -> &ModelRoute {
     if config.use_separate_ocr && !config.ocr_route.model.trim().is_empty() {
         &config.ocr_route
@@ -161,6 +171,43 @@ fn route_for_ocr(config: &AppConfig) -> &ModelRoute {
     } else {
         &config.text_route
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TaskProfile {
+    SimpleText,
+    AnalysisHeavy,
+    VisionHeavy,
+}
+
+fn classify_task(prompt: &str, history: &[String], screenshot_path: Option<&str>) -> TaskProfile {
+    let lower = prompt.to_ascii_lowercase();
+    if screenshot_path.is_some()
+        || lower.contains("экран")
+        || lower.contains("screen")
+        || lower.contains("клик")
+        || lower.contains("mouse")
+        || lower.contains("browser")
+        || lower.contains("брауз")
+        || lower.contains("ui")
+    {
+        return TaskProfile::VisionHeavy;
+    }
+
+    if history.len() > 4
+        || lower.contains("код")
+        || lower.contains("build")
+        || lower.contains("repo")
+        || lower.contains("git")
+        || lower.contains("tool")
+        || lower.contains("виджет")
+        || lower.contains("сделай проект")
+        || lower.contains("напиши игру")
+    {
+        return TaskProfile::AnalysisHeavy;
+    }
+
+    TaskProfile::SimpleText
 }
 
 fn ensure_route(route: &ModelRoute) -> Result<()> {
@@ -456,10 +503,11 @@ pub async fn next_turn(
     };
 
     let mut user = format!("User goal:\n{}\n\nCurrent step history:\n{}", prompt, history_text);
-    let route = if screenshot_path.is_some() {
-        route_for_vision(config)
-    } else {
-        &config.text_route
+    let task_profile = classify_task(prompt, history, screenshot_path);
+    let route = match task_profile {
+        TaskProfile::VisionHeavy => route_for_vision(config),
+        TaskProfile::AnalysisHeavy => route_for_analysis(config),
+        TaskProfile::SimpleText => &config.text_route,
     };
 
     if let Some(path) = screenshot_path {
@@ -476,7 +524,7 @@ Return only JSON with keys:
 - thought: short reasoning summary
 - actions: array of actions
 Each action must contain:
-- kind: one of respond, capture_screen, open_path, read_file, write_file, edit_file, run_powershell, run_command, clone_repo, git_command, download_file, install_widget_from_github, mouse_action, keyboard_combo, keyboard_action, type_text, finish
+- kind: one of respond, capture_screen, open_path, read_file, write_file, edit_file, run_powershell, run_command, clone_repo, git_command, download_file, install_widget_from_github, install_tool_from_github, run_installed_tool, mouse_action, keyboard_combo, keyboard_action, type_text, finish
 - args: JSON object for the action
 Rules:
 - Prefer direct actions over plain text.
@@ -484,7 +532,8 @@ Rules:
 - Keep each turn progressive and small.
 - If screen understanding is needed, use the screenshot and OCR text already provided.
 - If text needs to be typed into UI, prefer type_text.
-- If a click-drag or long hold is needed, use mouse_action with hold or drag."#;
+- If a click-drag or long hold is needed, use mouse_action with hold or drag.
+- If a required capability is missing, install a runtime tool from the tools branch and then execute it."#;
 
     let content = chat_json(route, system_text, &user, screenshot_path).await?;
     Ok(serde_json::from_str(&content)?)

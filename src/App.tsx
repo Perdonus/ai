@@ -18,6 +18,8 @@ type ModelRoute = {
 
 type AppConfig = {
   text_route: ModelRoute;
+  use_separate_analysis: boolean;
+  analysis_route: ModelRoute;
   use_separate_vision: boolean;
   vision_route: ModelRoute;
   use_separate_ocr: boolean;
@@ -59,10 +61,27 @@ type InstalledWidget = {
   entry_file: string;
 };
 
+type InstalledTool = {
+  manifest: {
+    id: string;
+    name: string;
+    description: string;
+    kind: string;
+    version: string;
+  };
+  folder: string;
+};
+
 type ScreenCapture = {
   path: string;
   width: number;
   height: number;
+};
+
+type CommandResult = {
+  success: boolean;
+  stdout: string;
+  stderr: string;
 };
 
 const providerLabels: Record<ProviderKind, string> = {
@@ -92,6 +111,8 @@ const emptyRoute = (provider: ProviderKind): ModelRoute => ({
 
 const fallbackConfig: AppConfig = {
   text_route: { ...emptyRoute("sosiski_bot"), model: "gpt-4o-mini" },
+  use_separate_analysis: false,
+  analysis_route: emptyRoute("sosiski_bot"),
   use_separate_vision: false,
   vision_route: emptyRoute("gemini"),
   use_separate_ocr: false,
@@ -108,10 +129,14 @@ export default function App() {
   const [status, setStatus] = useState<AgentStatus>({ active_task: null, logs: [] });
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
   const [widgets, setWidgets] = useState<InstalledWidget[]>([]);
+  const [tools, setTools] = useState<InstalledTool[]>([]);
   const [widgetName, setWidgetName] = useState("");
+  const [toolName, setToolName] = useState("");
+  const [toolOutput, setToolOutput] = useState<CommandResult | null>(null);
   const [capture, setCapture] = useState<ScreenCapture | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(true);
   const [textModels, setTextModels] = useState<ModelOption[]>([]);
+  const [analysisModels, setAnalysisModels] = useState<ModelOption[]>([]);
   const [visionModels, setVisionModels] = useState<ModelOption[]>([]);
   const [ocrModels, setOcrModels] = useState<ModelOption[]>([]);
 
@@ -122,7 +147,13 @@ export default function App() {
   }, []);
 
   async function refreshAll() {
-    await Promise.all([refreshConfig(), refreshStatus(), refreshWeather(), refreshWidgets()]);
+    await Promise.all([
+      refreshConfig(),
+      refreshStatus(),
+      refreshWeather(),
+      refreshWidgets(),
+      refreshTools()
+    ]);
   }
 
   async function refreshConfig() {
@@ -139,6 +170,10 @@ export default function App() {
 
   async function refreshWidgets() {
     setWidgets(await invoke<InstalledWidget[]>("list_widgets"));
+  }
+
+  async function refreshTools() {
+    setTools(await invoke<InstalledTool[]>("list_tools"));
   }
 
   async function takeScreen() {
@@ -167,17 +202,47 @@ export default function App() {
     await refreshWidgets();
   }
 
-  async function loadModels(kind: "text" | "vision" | "ocr") {
+  async function installTool(event: FormEvent) {
+    event.preventDefault();
+    if (!toolName.trim()) return;
+    await invoke("install_tool_from_github", { tool_name: toolName });
+    setToolName("");
+    await refreshTools();
+  }
+
+  async function runTool(toolId: string) {
+    const result = await invoke<CommandResult>("run_installed_tool", {
+      tool_id: toolId,
+      args: { path: "Z:\\ai", text: "hello from runtime tool" }
+    });
+    setToolOutput(result);
+  }
+
+  async function loadModels(kind: "text" | "analysis" | "vision" | "ocr") {
     const route =
-      kind === "text" ? config.text_route : kind === "vision" ? config.vision_route : config.ocr_route;
+      kind === "text"
+        ? config.text_route
+        : kind === "analysis"
+          ? config.analysis_route
+          : kind === "vision"
+            ? config.vision_route
+            : config.ocr_route;
     const models = await invoke<ModelOption[]>("list_models", { route });
     if (kind === "text") setTextModels(models);
+    if (kind === "analysis") setAnalysisModels(models);
     if (kind === "vision") setVisionModels(models);
     if (kind === "ocr") setOcrModels(models);
   }
 
-  function updateRoute(kind: "text" | "vision" | "ocr", next: Partial<ModelRoute>) {
-    const key = kind === "text" ? "text_route" : kind === "vision" ? "vision_route" : "ocr_route";
+  function updateRoute(kind: "text" | "analysis" | "vision" | "ocr", next: Partial<ModelRoute>) {
+    const key =
+      kind === "text"
+        ? "text_route"
+        : kind === "analysis"
+          ? "analysis_route"
+          : kind === "vision"
+            ? "vision_route"
+            : "ocr_route";
     const current = config[key];
     setConfig({ ...config, [key]: { ...current, ...next } });
   }
@@ -186,7 +251,7 @@ export default function App() {
     title: string,
     route: ModelRoute,
     models: ModelOption[],
-    kind: "text" | "vision" | "ocr",
+    kind: "text" | "analysis" | "vision" | "ocr",
     enabled = true
   ) {
     return (
@@ -266,10 +331,10 @@ export default function App() {
       <section className="panel hero">
         <div>
           <p className="eyebrow">Desktop AI Agent</p>
-          <h1>Мультипровайдерный агент с text, vision и OCR</h1>
+          <h1>Модельные маршруты, runtime tools и runtime widgets</h1>
           <p className="muted">
-            Теперь можно отдельно выбрать текстовую, вижн и OCR-модель: хоть GPT через
-            SosiskiBot, vision через Gemini, а OCR через Mistral.
+            Приложение теперь умеет докачивать не только виджеты, но и инструменты. Плюс
+            есть отдельные маршруты для text, analysis, vision и OCR.
           </p>
         </div>
         <button className="ghost" onClick={() => setSettingsOpen((value) => !value)}>
@@ -286,7 +351,7 @@ export default function App() {
             id="prompt"
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Используй text через GPT 5.4, vision через Gemini, OCR через Mistral и решай задачу по шагам."
+            placeholder="Если нужного действия нет локально — установи runtime tool из tools-ветки и используй его."
             rows={8}
           />
           <div className="row">
@@ -298,12 +363,12 @@ export default function App() {
             </button>
           </div>
           <div className="tool-grid">
-            <span>Multi API</span>
-            <span>Vision fallback</span>
-            <span>OCR fallback</span>
-            <span>Model lists</span>
-            <span>Mouse drag</span>
-            <span>Type text</span>
+            <span>Text Route</span>
+            <span>Analysis Route</span>
+            <span>Vision Route</span>
+            <span>OCR Route</span>
+            <span>Runtime Tools</span>
+            <span>App Artifacts</span>
           </div>
         </form>
 
@@ -354,7 +419,7 @@ export default function App() {
         <div className="row">
           <div>
             <p className="eyebrow">Runtime Widgets</p>
-            <h2>Установка из нашей widget-ветки</h2>
+            <h2>Установка из widget-ветки</h2>
           </div>
           <button className="ghost" onClick={() => void refreshWidgets()}>
             Обновить список
@@ -387,6 +452,42 @@ export default function App() {
         </div>
       </section>
 
+      <section className="panel widget-installer">
+        <div className="row">
+          <div>
+            <p className="eyebrow">Runtime Tools</p>
+            <h2>Инструменты без ребилда</h2>
+          </div>
+          <button className="ghost" onClick={() => void refreshTools()}>
+            Обновить список
+          </button>
+        </div>
+        <form className="widget-form" onSubmit={installTool}>
+          <input
+            value={toolName}
+            onChange={(event) => setToolName(event.target.value)}
+            placeholder="tool folder name"
+          />
+          <button type="submit">Скачать tool</button>
+        </form>
+        <div className="widget-grid">
+          {tools.map((tool) => (
+            <article className="widget-card" key={tool.manifest.id}>
+              <div className="widget-copy">
+                <p className="eyebrow">{tool.manifest.version || tool.manifest.kind}</p>
+                <h3>{tool.manifest.name}</h3>
+                <p className="muted">{tool.manifest.description}</p>
+                <button onClick={() => void runTool(tool.manifest.id)}>Запустить tool</button>
+              </div>
+            </article>
+          ))}
+          {tools.length === 0 ? <p className="muted">Инструменты пока не найдены.</p> : null}
+        </div>
+        {toolOutput ? (
+          <pre className="tool-output">{`${toolOutput.stdout}\n${toolOutput.stderr}`.trim()}</pre>
+        ) : null}
+      </section>
+
       <section className="panel">
         <div className="row">
           <div>
@@ -416,12 +517,22 @@ export default function App() {
             <label className="toggle">
               <input
                 type="checkbox"
+                checked={config.use_separate_analysis}
+                onChange={(event) =>
+                  setConfig({ ...config, use_separate_analysis: event.target.checked })
+                }
+              />
+              <span>Analysis модель отдельно</span>
+            </label>
+            <label className="toggle">
+              <input
+                type="checkbox"
                 checked={config.use_separate_vision}
                 onChange={(event) =>
                   setConfig({ ...config, use_separate_vision: event.target.checked })
                 }
               />
-              <span>Вижн модель отдельно</span>
+              <span>Vision модель отдельно</span>
             </label>
             <label className="toggle">
               <input
@@ -435,8 +546,9 @@ export default function App() {
             </label>
           </div>
 
-          <div className="routes-grid">
+          <div className="routes-grid routes-grid--four">
             {routeEditor("Text Route", config.text_route, textModels, "text", true)}
+            {routeEditor("Analysis Route", config.analysis_route, analysisModels, "analysis", config.use_separate_analysis)}
             {routeEditor("Vision Route", config.vision_route, visionModels, "vision", config.use_separate_vision)}
             {routeEditor("OCR Route", config.ocr_route, ocrModels, "ocr", config.use_separate_ocr)}
           </div>

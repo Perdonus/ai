@@ -1,6 +1,7 @@
 mod automation;
 mod config;
 mod provider;
+mod runtime_tools;
 mod screen;
 mod tools;
 mod weather;
@@ -10,6 +11,7 @@ use crate::{
     automation::{keyboard_action, keyboard_combo, KeyboardActionRequest, mouse_action, MouseActionRequest},
     config::{load_config as read_config_file, save_config as write_config_file, AppConfig, ModelRoute},
     provider::{AgentAction, AgentActionKind},
+    runtime_tools::InstalledRuntimeTool,
     screen::ScreenCapture,
     tools::CommandResult,
     weather::WeatherSnapshot,
@@ -162,6 +164,25 @@ async fn execute_action(state: &SharedState, _config: &AppConfig, action: AgentA
                 .await
                 .map_err(|e| e.to_string())?;
             log_tool_result(state, "install_widget", &widget.manifest.name);
+            Ok(false)
+        }
+        AgentActionKind::InstallToolFromGithub => {
+            let tool_name = string_arg(&action.args, "tool_name")?;
+            let repo = action.args.get("repo").and_then(Value::as_str);
+            let branch = action.args.get("branch").and_then(Value::as_str);
+            let tool = runtime_tools::install_tool_from_github(&tool_name, repo, branch)
+                .await
+                .map_err(|e| e.to_string())?;
+            log_tool_result(state, "install_tool", &tool.manifest.name);
+            Ok(false)
+        }
+        AgentActionKind::RunInstalledTool => {
+            let tool_id = string_arg(&action.args, "tool_id")?;
+            let args = action.args.get("args").cloned().unwrap_or_else(|| serde_json::json!({}));
+            let result = runtime_tools::execute_tool(&tool_id, args)
+                .await
+                .map_err(|e| e.to_string())?;
+            log_tool_result(state, "run_installed_tool", &format!("{}\n{}", result.stdout, result.stderr));
             Ok(false)
         }
         AgentActionKind::MouseAction => {
@@ -359,11 +380,33 @@ fn list_widgets() -> Result<Vec<InstalledWidget>, String> {
 }
 
 #[tauri::command]
+fn list_tools() -> Result<Vec<InstalledRuntimeTool>, String> {
+    runtime_tools::list_tools().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn install_widget_from_github(
     widget_name: String,
     branch: Option<String>,
 ) -> Result<InstalledWidget, String> {
     widgets::install_widget_from_github(None, &widget_name, branch.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn install_tool_from_github(
+    tool_name: String,
+    branch: Option<String>,
+) -> Result<InstalledRuntimeTool, String> {
+    runtime_tools::install_tool_from_github(&tool_name, None, branch.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn run_installed_tool(tool_id: String, args: Value) -> Result<CommandResult, String> {
+    runtime_tools::execute_tool(&tool_id, args)
         .await
         .map_err(|e| e.to_string())
 }
@@ -515,7 +558,10 @@ pub fn run() {
             cancel_task,
             get_weather,
             list_widgets,
+            list_tools,
             install_widget_from_github,
+            install_tool_from_github,
+            run_installed_tool,
             open_path,
             run_powershell,
             run_command,

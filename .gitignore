@@ -5,3 +5,7 @@ src-tauri/target/
 *.log
 tools/
 dxdiag.txt
+build-logs.zip
+cred.txt
+gcm-input.txt
+build-logs/

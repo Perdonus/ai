@@ -25,6 +25,10 @@ pub struct AppConfig {
     #[serde(default = "default_text_route")]
     pub text_route: ModelRoute,
     #[serde(default)]
+    pub use_separate_analysis: bool,
+    #[serde(default = "default_analysis_route")]
+    pub analysis_route: ModelRoute,
+    #[serde(default)]
     pub use_separate_vision: bool,
     #[serde(default = "default_vision_route")]
     pub vision_route: ModelRoute,
@@ -85,6 +89,15 @@ fn default_vision_route() -> ModelRoute {
     }
 }
 
+fn default_analysis_route() -> ModelRoute {
+    ModelRoute {
+        provider: ProviderKind::SosiskiBot,
+        base_url: "https://sosiskibot.ru/v1".to_string(),
+        api_key: String::new(),
+        model: String::new(),
+    }
+}
+
 fn default_ocr_route() -> ModelRoute {
     ModelRoute {
         provider: ProviderKind::SosiskiBot,
@@ -98,6 +111,8 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             text_route: default_text_route(),
+            use_separate_analysis: false,
+            analysis_route: default_analysis_route(),
             use_separate_vision: false,
             vision_route: default_vision_route(),
             use_separate_ocr: false,
