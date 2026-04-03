@@ -141,6 +141,10 @@ pub fn exports_dir() -> PathBuf {
     app_data_dir().join("exports")
 }
 
+pub fn logs_dir() -> PathBuf {
+    app_data_dir().join("logs")
+}
+
 fn config_path() -> PathBuf {
     app_data_dir().join("config.json")
 }

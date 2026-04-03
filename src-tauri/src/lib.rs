@@ -1,5 +1,6 @@
 mod automation;
 mod config;
+mod logging;
 mod provider;
 mod runtime_tools;
 mod screen;
@@ -10,6 +11,7 @@ mod widgets;
 use crate::{
     automation::{keyboard_action, keyboard_combo, KeyboardActionRequest, mouse_action, MouseActionRequest},
     config::{create_backup as make_config_backup, export_config as export_config_file, load_config as read_config_file, save_config as write_config_file, AppConfig, ModelRoute},
+    logging::{init_startup_logging, log_error, log_info, log_warn},
     provider::{AgentAction, AgentActionKind},
     runtime_tools::InstalledRuntimeTool,
     screen::ScreenCapture,
@@ -51,8 +53,10 @@ struct AgentStatus {
 }
 
 fn push_log(state: &SharedState, message: impl Into<String>) {
+    let message = message.into();
+    log_info(&message);
     let mut logs = state.logs.lock().expect("logs lock");
-    logs.push(message.into());
+    logs.push(message);
     while logs.len() > 120 {
         logs.remove(0);
     }
@@ -511,16 +515,21 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             _ => {}
         })
         .build(app)?;
+    log_info("Tray icon initialized.");
     Ok(())
 }
 
 pub fn run() {
+    init_startup_logging();
+    log_info("desktop_ai_agent_lib::run entered");
     let initial_config = read_config_file().unwrap_or_default();
+    log_info("Configuration loaded.");
     let state = Arc::new(SharedState {
         config: Mutex::new(initial_config),
         ..Default::default()
     });
 
+    log_info("Building Tauri application.");
     tauri::Builder::default()
         .manage(state)
         .plugin(tauri_plugin_shell::init())
@@ -528,27 +537,48 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .setup(|app| {
-            build_tray(app.handle())?;
-            app.handle().plugin(
-                tauri_plugin_global_shortcut::Builder::new()
-                    .with_shortcuts(["AltRight"])?
-                    .with_handler(|app, _shortcut, event| {
-                        use tauri_plugin_global_shortcut::ShortcutState;
-                        if event.state == ShortcutState::Pressed {
-                            if let Some(window) = app.get_webview_window("main") {
-                                if window.is_visible().unwrap_or(true) {
-                                    let _ = window.hide();
-                                } else {
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
+            log_info("Tauri setup started.");
+            if let Err(error) = build_tray(app.handle()) {
+                log_error(format!("Tray initialization failed: {error}"));
+            }
+
+            match tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcuts(["AltRight"])
+            {
+                Ok(builder) => {
+                    let plugin = builder
+                        .with_handler(|app, _shortcut, event| {
+                            use tauri_plugin_global_shortcut::ShortcutState;
+                            if event.state == ShortcutState::Pressed {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    if window.is_visible().unwrap_or(true) {
+                                        let _ = window.hide();
+                                    } else {
+                                        let _ = window.show();
+                                        let _ = window.set_focus();
+                                    }
                                 }
                             }
-                        }
-                    })
-                    .build(),
-            )?;
+                        })
+                        .build();
+
+                    match app.handle().plugin(plugin) {
+                        Ok(_) => log_info("Global shortcut registered: AltRight"),
+                        Err(error) => log_error(format!("Global shortcut plugin failed: {error}")),
+                    }
+                }
+                Err(error) => {
+                    log_warn(format!(
+                        "Global shortcut registration skipped for AltRight: {error}"
+                    ));
+                }
+            }
             let window = app.get_webview_window("main").expect("main window");
-            let _ = window.set_always_on_top(true);
+            match window.set_always_on_top(true) {
+                Ok(_) => log_info("Main window set to always-on-top."),
+                Err(error) => log_warn(format!("Failed to set always-on-top: {error}")),
+            }
+            log_info("Tauri setup completed.");
 
             Ok(())
         })
@@ -588,5 +618,8 @@ pub fn run() {
             keyboard_action_cmd
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|error| {
+            log_error(format!("error while running tauri application: {error}"));
+            panic!("error while running tauri application: {error}");
+        });
 }
