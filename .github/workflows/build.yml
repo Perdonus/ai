@@ -5,6 +5,9 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   windows-build:
     runs-on: windows-latest
@@ -22,10 +25,30 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install frontend dependencies
-        run: npm install
+        shell: pwsh
+        run: |
+          npm install *>&1 | Tee-Object -FilePath npm-install.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build frontend
-        run: npm run build
+        shell: pwsh
+        run: |
+          npm run build *>&1 | Tee-Object -FilePath frontend-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Cargo check
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+        shell: pwsh
+        run: |
+          cargo check --manifest-path src-tauri/Cargo.toml *>&1 | Tee-Object -FilePath cargo-check.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            npm-install.log
+            frontend-build.log
+            cargo-check.log
+          if-no-files-found: warn
