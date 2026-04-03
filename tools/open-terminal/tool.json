@@ -1,0 +1,16 @@
+{
+  "id": "open-terminal",
+  "name": "Open Terminal",
+  "description": "Open PowerShell in a target folder.",
+  "kind": "command",
+  "entry": "powershell",
+  "args_template": [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    "Start-Process powershell -ArgumentList '-NoProfile','-NoExit','-Command','Set-Location -LiteralPath \"{{path}}\"'"
+  ],
+  "version": "0.1.0"
+}
+

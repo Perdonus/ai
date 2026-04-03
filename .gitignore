@@ -3,7 +3,8 @@ dist/
 src-tauri/target/
 .env
 *.log
-tools/
+tools/mingit/
+tools/mingit.zip
 dxdiag.txt
 build-logs.zip
 cred.txt
