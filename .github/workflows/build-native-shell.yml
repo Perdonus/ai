@@ -36,6 +36,12 @@ jobs:
           msbuild native/AgentShell/AgentShell.csproj /p:Configuration=Release /p:Platform=x64 *>&1 | Tee-Object -FilePath native-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Add simple uninstall script
+        shell: pwsh
+        run: |
+          $output = 'native/AgentShell/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64'
+          Copy-Item -LiteralPath 'native/support/unins000.cmd' -Destination (Join-Path $output 'unins000.cmd') -Force
+
       - name: Upload native shell artifact
         if: success()
         uses: actions/upload-artifact@v4
