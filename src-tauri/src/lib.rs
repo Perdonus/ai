@@ -9,7 +9,7 @@ mod widgets;
 
 use crate::{
     automation::{keyboard_action, keyboard_combo, KeyboardActionRequest, mouse_action, MouseActionRequest},
-    config::{load_config as read_config_file, save_config as write_config_file, AppConfig, ModelRoute},
+    config::{create_backup as make_config_backup, export_config as export_config_file, load_config as read_config_file, save_config as write_config_file, AppConfig, ModelRoute},
     provider::{AgentAction, AgentActionKind},
     runtime_tools::InstalledRuntimeTool,
     screen::ScreenCapture,
@@ -237,6 +237,16 @@ fn save_config(state: State<'_, Arc<SharedState>>, config: AppConfig) -> Result<
     *state.config.lock().map_err(|e| e.to_string())? = config;
     push_log(&state, "Config updated.");
     Ok(())
+}
+
+#[tauri::command]
+fn backup_config() -> Result<String, String> {
+    make_config_backup().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn export_config() -> Result<String, String> {
+    export_config_file().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -552,6 +562,8 @@ pub fn run() {
             load_config,
             list_models,
             save_config,
+            backup_config,
+            export_config,
             agent_status,
             capture_screen,
             run_task,

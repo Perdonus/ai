@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use chrono::Utc;
 use std::{fs, path::PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,8 +133,20 @@ pub fn app_data_dir() -> PathBuf {
     base.join("DesktopAIAgent")
 }
 
+pub fn backups_dir() -> PathBuf {
+    app_data_dir().join("backups")
+}
+
+pub fn exports_dir() -> PathBuf {
+    app_data_dir().join("exports")
+}
+
 fn config_path() -> PathBuf {
     app_data_dir().join("config.json")
+}
+
+fn stamped_file(prefix: &str) -> String {
+    format!("{}-{}.json", prefix, Utc::now().format("%Y%m%d-%H%M%S"))
 }
 
 pub fn load_config() -> anyhow::Result<AppConfig> {
@@ -150,6 +163,33 @@ pub fn save_config(config: &AppConfig) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    if path.exists() {
+        create_backup()?;
+    }
     fs::write(path, serde_json::to_vec_pretty(config)?)?;
     Ok(())
+}
+
+pub fn create_backup() -> anyhow::Result<String> {
+    let source = config_path();
+    if !source.exists() {
+        return Err(anyhow::anyhow!("Config file does not exist yet"));
+    }
+    let dir = backups_dir();
+    fs::create_dir_all(&dir)?;
+    let target = dir.join(stamped_file("config-backup"));
+    fs::copy(&source, &target)?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+pub fn export_config() -> anyhow::Result<String> {
+    let source = config_path();
+    if !source.exists() {
+        return Err(anyhow::anyhow!("Config file does not exist yet"));
+    }
+    let dir = exports_dir();
+    fs::create_dir_all(&dir)?;
+    let target = dir.join(stamped_file("config-export"));
+    fs::copy(&source, &target)?;
+    Ok(target.to_string_lossy().to_string())
 }

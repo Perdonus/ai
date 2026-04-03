@@ -135,6 +135,7 @@ export default function App() {
   const [toolOutput, setToolOutput] = useState<CommandResult | null>(null);
   const [capture, setCapture] = useState<ScreenCapture | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(true);
+  const [configFileAction, setConfigFileAction] = useState("");
   const [textModels, setTextModels] = useState<ModelOption[]>([]);
   const [analysisModels, setAnalysisModels] = useState<ModelOption[]>([]);
   const [visionModels, setVisionModels] = useState<ModelOption[]>([]);
@@ -208,6 +209,16 @@ export default function App() {
     await invoke("install_tool_from_github", { tool_name: toolName });
     setToolName("");
     await refreshTools();
+  }
+
+  async function backupConfigNow() {
+    const path = await invoke<string>("backup_config");
+    setConfigFileAction(`Backup: ${path}`);
+  }
+
+  async function exportConfigNow() {
+    const path = await invoke<string>("export_config");
+    setConfigFileAction(`Export: ${path}`);
   }
 
   async function runTool(toolId: string) {
@@ -510,8 +521,17 @@ export default function App() {
               <p className="eyebrow">Настройки ИИ</p>
               <h2>Маршруты моделей и fallback-флажки</h2>
             </div>
-            <button type="submit">Сохранить</button>
+            <div className="row">
+              <button className="ghost" type="button" onClick={() => void backupConfigNow()}>
+                Backup
+              </button>
+              <button className="ghost" type="button" onClick={() => void exportConfigNow()}>
+                Export
+              </button>
+              <button type="submit">Сохранить</button>
+            </div>
           </div>
+          {configFileAction ? <p className="caption">{configFileAction}</p> : null}
 
           <div className="toggle-row">
             <label className="toggle">
