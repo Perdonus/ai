@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Threading;
 using AgentShell.Services;
 using Microsoft.UI.Xaml;
 
@@ -30,9 +29,7 @@ public static class Program
         Application.Start(_ =>
         {
             StartupLogService.Info("Application.Start callback entered.");
-            SynchronizationContext.SetSynchronizationContext(
-                new DispatcherQueueSynchronizationContext(Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread()));
-            _ = new App();
+            new App();
         });
 
         StartupLogService.Warn("Application.Start returned.");
