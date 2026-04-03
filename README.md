@@ -1,94 +1,78 @@
 # Desktop AI Agent
 
-Windows-only desktop agent scaffold on `Tauri v2 + Rust + React`.
+Windows desktop agent moving to a native WinUI shell.
 
-## Included
+## Current app direction
 
-- `Right Alt` global shortcut shell for panel toggle
-- tray/background app pattern
-- settings UI for OpenAI-compatible API provider
-- API client pointed at `https://sosiskibot.ru/v1` by default
-- weather widget backed by Open-Meteo
-- local tools for files, arbitrary commands, PowerShell and path opening
-- step-by-step agent run loop with structured tool actions, cancellation and logs
-- native screenshot capture to PNG on Windows
-- native mouse and keyboard input via `SendInput`
-- git/clone/download commands
-- runtime widget loading from local folders or the `Perdonus/ai` `widgets` branch
-- runtime tool loading from local folders or the `Perdonus/ai` `tools` branch
-- separate `text`, `analysis`, `vision`, `ocr` model routes with fallback flags
-- separate GitHub Actions workflows for app, widgets and tools
-- GitHub Actions uploads the Windows app artifact plus separate widget/tool package artifacts
+- Native WinUI launcher instead of a webview shell
+- Compact top-right prompt panel
+- Global hotkey on `Right Ctrl`
+- Auto-focus into the input field on open
+- Hide with animation when focus is lost
+- Separate native settings window opened by agent command
 
-## Missing before production
+## Native shell
 
-- dangerous action confirmation UX
-- packaging icons and build verification
-- build verification in this environment
+Main project:
 
-## Expected config
+- `native/AgentShell/AgentShell.csproj`
 
-The app persists config under `%APPDATA%/DesktopAIAgent/config.json`.
+Key windows:
 
-Main fields:
+- `native/AgentShell/LauncherWindow.xaml`
+- `native/AgentShell/SettingsWindow.xaml`
 
-- `base_url`
-- `api_key`
-- `text_model`
-- `vision_model`
-- `weather_location`
-- `max_steps`
-- `confirmation_policy`
+Core native services:
 
-## Widget contract
+- `native/AgentShell/Services/ShellConfigService.cs`
+- `native/AgentShell/Services/ModelDiscoveryService.cs`
+- `native/AgentShell/Services/RuntimeCatalogService.cs`
+- `native/AgentShell/Services/GlobalHotkeyService.cs`
+- `native/AgentShell/Services/WindowVisualService.cs`
 
-Widgets are loaded at runtime from:
+## Settings structure
+
+The native settings UI is organized into:
+
+- Providers
+- Models
+- Tools
+- Widgets
+
+Provider settings only store API keys.
+
+Supported provider presets:
+
+- SosiskiBot
+- OpenAI
+- OpenRouter
+- Gemini
+- Mistral
+- Hugging Face
+
+Default SosiskiBot base URL:
+
+- `https://sosiskibot.ru/api/v1`
+
+## Runtime catalogs
+
+Runtime widgets are loaded from:
 
 - `Z:\ai\widgets`
-- `%APPDATA%/DesktopAIAgent/widgets`
-
-Each widget must live in its own folder and contain:
-
-- `widget.json`
-- an HTML entry file referenced by `entry_html`
-
-Example `widget.json`:
-
-```json
-{
-  "id": "weather-pro",
-  "name": "Weather Pro",
-  "description": "Compact animated weather widget",
-  "entry_html": "dist/index.html",
-  "version": "0.1.0"
-}
-```
-
-Runtime install expects widgets to be published in the `widgets` branch of `https://github.com/Perdonus/ai`, under:
-
-```text
-widgets/<widget-name>/
-```
-
-inside the target repository branch.
-
-Widget base index:
-
-- `widgets-catalog.json`
-
-## Runtime tools
+- `%APPDATA%\DesktopAIAgent\widgets`
 
 Runtime tools are loaded from:
 
 - `Z:\ai\tools`
-- `%APPDATA%/DesktopAIAgent/tools`
+- `%APPDATA%\DesktopAIAgent\tools`
 
-Remote installation expects tools to be published in the `tools` branch of `https://github.com/Perdonus/ai`, under:
+## GitHub workflows
 
-```text
-tools/<tool-name>/
-```
+Primary application workflow:
 
-Tool base index:
+- `.github/workflows/build-native-shell.yml`
 
-- `tools-catalog.json`
+Separate package workflows:
+
+- `.github/workflows/build-widgets.yml`
+- `.github/workflows/build-tools.yml`

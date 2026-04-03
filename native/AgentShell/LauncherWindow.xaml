@@ -1,0 +1,41 @@
+<Window
+    x:Class="AgentShell.LauncherWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+    <Grid Background="Transparent">
+        <Border
+            x:Name="ShellPanel"
+            Width="468"
+            Height="108"
+            Padding="20,18"
+            Background="{StaticResource ShellPanelBrush}"
+            BorderBrush="{StaticResource ShellPanelEdgeBrush}"
+            BorderThickness="1"
+            CornerRadius="28">
+            <Grid RowDefinitions="Auto,Auto">
+                <TextBlock
+                    Text="Agent"
+                    Foreground="{StaticResource ShellAccentBrush}"
+                    FontSize="13"
+                    FontWeight="SemiBold"
+                    Opacity="0.92" />
+                <TextBox
+                    x:Name="PromptBox"
+                    Grid.Row="1"
+                    Margin="0,12,0,0"
+                    Height="44"
+                    Padding="14,0"
+                    PlaceholderText="Напиши действие"
+                    FontSize="18"
+                    Background="#171F2B"
+                    BorderThickness="0"
+                    Foreground="{StaticResource ShellTextBrush}"
+                    CornerRadius="18"
+                    KeyDown="PromptBox_KeyDown" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,59 @@
+name: build-native-shell
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "native/**"
+      - ".github/workflows/build-native-shell.yml"
+  workflow_dispatch:
+
+jobs:
+  windows-native-shell:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore native shell
+        shell: pwsh
+        run: |
+          dotnet restore native/AgentShell/AgentShell.csproj *>&1 | Tee-Object -FilePath native-restore.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build native shell
+        shell: pwsh
+        run: |
+          dotnet build native/AgentShell/AgentShell.csproj -c Release *>&1 | Tee-Object -FilePath native-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish native shell
+        shell: pwsh
+        run: |
+          dotnet publish native/AgentShell/AgentShell.csproj -c Release -o native-publish *>&1 | Tee-Object -FilePath native-publish.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload native shell artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-shell-windows
+          path: native-publish/**
+          if-no-files-found: error
+
+      - name: Upload native shell logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-shell-build-logs
+          path: |
+            native-restore.log
+            native-build.log
+            native-publish.log
+          if-no-files-found: warn

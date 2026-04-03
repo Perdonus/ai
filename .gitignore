@@ -10,3 +10,9 @@ build-logs.zip
 cred.txt
 gcm-input.txt
 build-logs/
+native/**/bin/
+native/**/obj/
+tools/dotnet/
+app-build-logs.zip
+app-bundle-23961327982.zip
+app-bundle-23961327982/
