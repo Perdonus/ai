@@ -47,20 +47,22 @@ jobs:
           cargo check --manifest-path src-tauri/Cargo.toml *>&1 | Tee-Object -FilePath cargo-check.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build desktop app
+      - name: Build desktop app bundle
         shell: pwsh
         run: |
-          cargo build --release --manifest-path src-tauri/Cargo.toml *>&1 | Tee-Object -FilePath cargo-build.log
+          npm run tauri build *>&1 | Tee-Object -FilePath cargo-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Upload desktop app artifact
+      - name: Upload desktop app bundle artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-ai-agent-windows
+          name: desktop-ai-agent-bundle-windows
           path: |
-            src-tauri/target/release/*.exe
-            src-tauri/target/release/*.pdb
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.msi
           if-no-files-found: error
 
       - name: Upload app build logs
@@ -74,4 +76,3 @@ jobs:
             cargo-check.log
             cargo-build.log
           if-no-files-found: warn
-
