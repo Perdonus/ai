@@ -18,24 +18,30 @@ public sealed class ShellConfigService
 
     public string NativeConfigPath => Path.Combine(ConfigRoot, "native-shell.json");
 
-    public async Task EnsureLoadedAsync()
+    public void EnsureLoaded()
     {
         Directory.CreateDirectory(ConfigRoot);
 
         if (!File.Exists(NativeConfigPath))
         {
             Current = new ShellConfig();
-            await SaveAsync();
+            Save();
             return;
         }
 
-        await using var stream = File.OpenRead(NativeConfigPath);
-        Current = await JsonSerializer.DeserializeAsync<ShellConfig>(stream, JsonOptions) ?? new ShellConfig();
+        var raw = File.ReadAllText(NativeConfigPath);
+        Current = JsonSerializer.Deserialize<ShellConfig>(raw, JsonOptions) ?? new ShellConfig();
     }
 
     public async Task SaveAsync()
     {
         Directory.CreateDirectory(ConfigRoot);
         await File.WriteAllTextAsync(NativeConfigPath, JsonSerializer.Serialize(Current, JsonOptions));
+    }
+
+    public void Save()
+    {
+        Directory.CreateDirectory(ConfigRoot);
+        File.WriteAllText(NativeConfigPath, JsonSerializer.Serialize(Current, JsonOptions));
     }
 }

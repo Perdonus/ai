@@ -20,10 +20,10 @@ public partial class App : Application
         InitializeComponent();
     }
 
-    protected override async void OnLaunched(LaunchActivatedEventArgs args)
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         StartupLogService.Info("OnLaunched started.");
-        await ConfigService.EnsureLoadedAsync();
+        ConfigService.EnsureLoaded();
         StartupLogService.Info("Configuration loaded.");
 
         Launcher = new LauncherWindow();
