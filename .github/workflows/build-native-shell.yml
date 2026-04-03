@@ -33,7 +33,7 @@ jobs:
       - name: Publish native shell
         shell: pwsh
         run: |
-          msbuild native/AgentShell/AgentShell.csproj /t:Publish /p:Configuration=Release /p:Platform=x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true /p:PublishDir=native/AgentShell/publish/win-x64/ *>&1 | Tee-Object -FilePath native-build.log
+          msbuild native/AgentShell/AgentShell.csproj /t:Publish /p:Configuration=Release /p:Platform=x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true /p:PublishDir=publish/win-x64/ *>&1 | Tee-Object -FilePath native-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Add simple uninstall script
