@@ -21,22 +21,19 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
       - name: Restore native shell
         shell: pwsh
         run: |
-          dotnet restore native/AgentShell/AgentShell.csproj *>&1 | Tee-Object -FilePath native-restore.log
+          msbuild native/AgentShell/AgentShell.csproj /restore /p:Configuration=Release /p:Platform=x64 *>&1 | Tee-Object -FilePath native-restore.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build native shell
         shell: pwsh
         run: |
-          dotnet build native/AgentShell/AgentShell.csproj -c Release *>&1 | Tee-Object -FilePath native-build.log
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Publish native shell
-        shell: pwsh
-        run: |
-          dotnet publish native/AgentShell/AgentShell.csproj -c Release -o native-publish *>&1 | Tee-Object -FilePath native-publish.log
+          msbuild native/AgentShell/AgentShell.csproj /p:Configuration=Release /p:Platform=x64 *>&1 | Tee-Object -FilePath native-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload native shell artifact
@@ -44,7 +41,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-shell-windows
-          path: native-publish/**
+          path: native/AgentShell/bin/Release/net8.0-windows10.0.19041.0/win-x64/**
           if-no-files-found: error
 
       - name: Upload native shell logs
@@ -55,5 +52,4 @@ jobs:
           path: |
             native-restore.log
             native-build.log
-            native-publish.log
           if-no-files-found: warn
