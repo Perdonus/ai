@@ -39,15 +39,18 @@ jobs:
       - name: Add simple uninstall script
         shell: pwsh
         run: |
-          $output = 'native/AgentShell/publish/win-x64'
+          $exe = Get-ChildItem -Path 'native/AgentShell/publish' -Filter 'AgentShell.exe' -Recurse -File | Select-Object -First 1
+          if (-not $exe) { throw 'AgentShell.exe not found in publish output.' }
+          $output = $exe.Directory.FullName
           Copy-Item -LiteralPath 'native/support/unins000.cmd' -Destination (Join-Path $output 'unins000.cmd') -Force
+          Write-Host "Using publish output: $output"
 
       - name: Upload native shell artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: native-shell-windows
-          path: native/AgentShell/publish/win-x64/**
+          path: native/AgentShell/publish/**
           if-no-files-found: error
 
       - name: Upload native shell logs
