@@ -30,6 +30,37 @@ public sealed class AgentChatService
 
     public bool ShouldShowAnalysisThinking(ShellConfig config) => config.Models.AnalysisThinking;
 
+    public bool CanLikelyUseImages(ModelRoute route)
+    {
+        var providerId = route.Provider.Trim().ToLowerInvariant();
+        var model = route.Model.Trim().ToLowerInvariant();
+        if (providerId == "gemini")
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return false;
+        }
+
+        if (model.Contains("codestral", StringComparison.OrdinalIgnoreCase) ||
+            model.Contains("embed", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return model.Contains("vision", StringComparison.OrdinalIgnoreCase) ||
+               model.Contains("pixtral", StringComparison.OrdinalIgnoreCase) ||
+               model.Contains("vl", StringComparison.OrdinalIgnoreCase) ||
+               model.Contains("omni", StringComparison.OrdinalIgnoreCase) ||
+               model.Contains("4o", StringComparison.OrdinalIgnoreCase) ||
+               model.Contains("gpt-4.1", StringComparison.OrdinalIgnoreCase) ||
+               model.Contains("gemini", StringComparison.OrdinalIgnoreCase) ||
+               model.Contains("claude", StringComparison.OrdinalIgnoreCase) ||
+               model.Contains("mistral-large", StringComparison.OrdinalIgnoreCase);
+    }
+
     public async Task<string> RequestTextAsync(
         ShellConfig config,
         ModelRoute route,
@@ -43,26 +74,26 @@ public sealed class AgentChatService
         return provider.Id switch
         {
             "gemini" => await RequestGeminiAsync(provider, route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken),
-            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", route.Model, apiKey, systemPrompt, userPrompt, null, expectJson: false, cancellationToken),
-            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, route.Model, apiKey, systemPrompt, userPrompt, null, expectJson: false, cancellationToken)
+            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken),
+            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken)
         };
     }
 
-    public async Task<string> RequestVisionJsonAsync(
+    public async Task<string> RequestJsonAsync(
         ShellConfig config,
         ModelRoute route,
         string systemPrompt,
         string userPrompt,
-        ScreenSnapshot screenshot,
+        ScreenSnapshot? screenshot,
         CancellationToken cancellationToken)
     {
         var provider = ResolveProvider(route, config, out var apiKey);
-        StartupLogService.Info($"Running agent step via {provider.Id}/{route.Model}.");
+        StartupLogService.Info($"Running agent step via {provider.Id}/{route.Model}. screenshot={screenshot is not null}");
         var raw = provider.Id switch
         {
             "gemini" => await RequestGeminiAsync(provider, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
-            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", route.Model, apiKey, systemPrompt, userPrompt, screenshot, expectJson: true, cancellationToken),
-            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, route.Model, apiKey, systemPrompt, userPrompt, screenshot, expectJson: true, cancellationToken)
+            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
+            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken)
         };
 
         return ExtractJsonObject(raw);
@@ -94,7 +125,6 @@ public sealed class AgentChatService
         string systemPrompt,
         string userPrompt,
         ScreenSnapshot? screenshot,
-        bool expectJson,
         CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl.TrimEnd('/')}/chat/completions");
@@ -176,7 +206,7 @@ public sealed class AgentChatService
                         new
                         {
                             role = "user",
-                            parts = parts
+                            parts
                         }
                     },
                     generationConfig = new

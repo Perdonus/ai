@@ -47,22 +47,14 @@ public sealed class DesktopActionService
         var urlMatch = Regex.Match(prompt, @"https?://\S+", RegexOptions.IgnoreCase);
         if (urlMatch.Success)
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = urlMatch.Value,
-                UseShellExecute = true
-            });
+            await OpenUrlAsync(urlMatch.Value, cancellationToken);
             return new DesktopActionResult($"Открыл {urlMatch.Value}.");
         }
 
         var pathMatch = Regex.Match(prompt, "[A-Za-z]:\\\\[^\\r\\n\"]+");
         if (pathMatch.Success && (File.Exists(pathMatch.Value) || Directory.Exists(pathMatch.Value)))
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = pathMatch.Value,
-                UseShellExecute = true
-            });
+            await OpenPathAsync(pathMatch.Value, cancellationToken);
             return new DesktopActionResult($"Открыл {pathMatch.Value}.");
         }
 
@@ -77,6 +69,30 @@ public sealed class DesktopActionService
         _input.TypeText(target);
         await _input.WaitAsync(120, cancellationToken);
         _input.PressKey("ENTER");
+    }
+
+    public Task OpenUrlAsync(string url, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = url,
+            UseShellExecute = true
+        });
+
+        return Task.CompletedTask;
+    }
+
+    public Task OpenPathAsync(string path, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = path,
+            UseShellExecute = true
+        });
+
+        return Task.CompletedTask;
     }
 
     private static bool ContainsActionVerb(string normalized)

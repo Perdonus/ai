@@ -1,0 +1,18 @@
+{
+  "id": "git-status",
+  "name": "Git Status",
+  "description": "Show concise git status for a repository.",
+  "kind": "command",
+  "entry": "..\\mingit\\cmd\\git.exe",
+  "system_prompt": "Use this to inspect repository state before editing, committing, or building a project.",
+  "parameter_hints": {
+    "repo_path": "absolute repository path"
+  },
+  "args_template": [
+    "-C",
+    "{{repo_path}}",
+    "status",
+    "--short"
+  ],
+  "version": "0.1.0"
+}

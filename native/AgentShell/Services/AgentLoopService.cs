@@ -10,6 +10,9 @@ public sealed class AgentLoopService
     private readonly ScreenCaptureService _screen = new();
     private readonly DesktopActionService _desktop = new();
     private readonly InputAutomationService _input = new();
+    private readonly DesktopContextService _context = new();
+    private readonly ClipboardService _clipboard = new();
+    private readonly RuntimeToolService _runtimeTools = new();
 
     public async Task<AgentLoopResult> RunAsync(
         ShellConfig config,
@@ -22,18 +25,22 @@ public sealed class AgentLoopService
 
         var visibleThoughts = new StringBuilder();
         string finalAnswer = string.Empty;
+        var runtimeTools = await _runtimeTools.LoadAsync();
+        var toolPrompt = _runtimeTools.BuildToolPrompt(runtimeTools);
 
         for (var step = 1; step <= 8; step++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(new AgentLoopProgress($"Шаг {step}: смотрю на экран", visibleThoughts.ToString(), finalAnswer));
             var snapshot = _screen.Capture();
+            var context = _context.Capture();
+            var clipboardPreview = _clipboard.GetPreview();
 
             string analysis = string.Empty;
             var analysisRoute = _chat.ResolveAnalysisRoute(config);
             if (analysisRoute is not null)
             {
-                var analysisPrompt = BuildAnalysisPrompt(session, prompt, step);
+                var analysisPrompt = BuildAnalysisPrompt(session, prompt, step, context, clipboardPreview);
                 analysis = await _chat.RequestTextAsync(
                     config,
                     analysisRoute,
@@ -48,16 +55,18 @@ public sealed class AgentLoopService
                 }
             }
 
-            var visionRoute = _chat.ResolveVisionRoute(config);
-            var stepResponse = await _chat.RequestVisionJsonAsync(
+            var decision = await DecideNextActionAsync(
                 config,
-                visionRoute,
-                BuildDecisionSystemPrompt(),
-                BuildDecisionUserPrompt(session, prompt, step, snapshot, analysis),
+                session,
+                prompt,
+                step,
                 snapshot,
+                context,
+                clipboardPreview,
+                analysis,
+                toolPrompt,
                 cancellationToken);
 
-            var decision = ParseDecision(stepResponse);
             if (_chat.ShouldShowPrimaryThinking(config) && !string.IsNullOrWhiteSpace(decision.Thought))
             {
                 AppendThought(visibleThoughts, step, decision.Thought);
@@ -86,9 +95,64 @@ public sealed class AgentLoopService
             await _input.WaitAsync(500, cancellationToken);
         }
 
-        finalAnswer = "Не успел закончить за лимит шагов. Сформулируй задачу уже точнее или продолжи её следующим сообщением.";
+        finalAnswer = "Не успел закончить за лимит шагов. Сформулируй задачу точнее или продолжи её следующим сообщением.";
         session.History.Add($"Ассистент: {finalAnswer}");
         return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty);
+    }
+
+    private async Task<AgentDecision> DecideNextActionAsync(
+        ShellConfig config,
+        AgentSessionState session,
+        string prompt,
+        int step,
+        ScreenSnapshot snapshot,
+        DesktopContextSnapshot context,
+        string clipboardPreview,
+        string analysis,
+        string toolPrompt,
+        CancellationToken cancellationToken)
+    {
+        var route = _chat.ResolveVisionRoute(config);
+        var systemPrompt = BuildDecisionSystemPrompt(toolPrompt);
+        var withScreenshotPrompt = BuildDecisionUserPrompt(
+            session,
+            prompt,
+            step,
+            snapshot,
+            context,
+            clipboardPreview,
+            analysis,
+            screenshotAttached: true);
+
+        if (_chat.CanLikelyUseImages(route))
+        {
+            try
+            {
+                var json = await _chat.RequestJsonAsync(config, route, systemPrompt, withScreenshotPrompt, snapshot, cancellationToken);
+                return ParseDecision(json);
+            }
+            catch (Exception ex) when (LooksLikeImageCapabilityFailure(ex))
+            {
+                StartupLogService.Warn($"Falling back to text-only planning for {route.Provider}/{route.Model}: {ex.Message}");
+            }
+        }
+        else
+        {
+            StartupLogService.Warn($"Skipping image input for likely text-only model {route.Provider}/{route.Model}.");
+        }
+
+        var textOnlyPrompt = BuildDecisionUserPrompt(
+            session,
+            prompt,
+            step,
+            snapshot,
+            context,
+            clipboardPreview,
+            analysis,
+            screenshotAttached: false);
+
+        var fallbackJson = await _chat.RequestJsonAsync(config, route, systemPrompt, textOnlyPrompt, null, cancellationToken);
+        return ParseDecision(fallbackJson);
     }
 
     private async Task<string> ExecuteActionAsync(AgentAction action, ScreenSnapshot snapshot, CancellationToken cancellationToken)
@@ -110,6 +174,22 @@ public sealed class AgentLoopService
 
                 await _desktop.OpenAppVisualAsync(action.Target, cancellationToken);
                 return $"Открыл {action.Target}";
+            case "open_url":
+                if (string.IsNullOrWhiteSpace(action.Target))
+                {
+                    throw new InvalidOperationException("open_url requires target");
+                }
+
+                await _desktop.OpenUrlAsync(action.Target, cancellationToken);
+                return $"Открыл URL {action.Target}";
+            case "open_path":
+                if (string.IsNullOrWhiteSpace(action.Target))
+                {
+                    throw new InvalidOperationException("open_path requires target");
+                }
+
+                await _desktop.OpenPathAsync(action.Target, cancellationToken);
+                return $"Открыл путь {action.Target}";
             case "type_text":
                 if (string.IsNullOrWhiteSpace(action.Text))
                 {
@@ -118,6 +198,21 @@ public sealed class AgentLoopService
 
                 _input.TypeText(action.Text);
                 return $"Ввел текст: {action.Text}";
+            case "set_clipboard":
+                if (action.Text is null)
+                {
+                    throw new InvalidOperationException("set_clipboard requires text");
+                }
+
+                _clipboard.SetText(action.Text);
+                return $"Записал в буфер обмена: {_clipboard.GetPreview()}";
+            case "paste_clipboard":
+                _input.PressKeyCombo(["CTRL", "V"]);
+                return "Вставил буфер обмена";
+            case "copy_selection":
+                _input.PressKeyCombo(["CTRL", "C"]);
+                await _input.WaitAsync(180, cancellationToken);
+                return $"Скопировал выделение: {_clipboard.GetPreview()}";
             case "press_key":
                 if (string.IsNullOrWhiteSpace(action.Key))
                 {
@@ -142,65 +237,100 @@ public sealed class AgentLoopService
 
                 _input.LeftClick(snapshot.Left + action.X.Value, snapshot.Top + action.Y.Value);
                 return $"Кликнул по координатам {action.X},{action.Y}";
+            case "run_tool":
+                if (string.IsNullOrWhiteSpace(action.Target))
+                {
+                    throw new InvalidOperationException("run_tool requires target");
+                }
+
+                var toolOutput = await _runtimeTools.ExecuteAsync(action.Target, action.Arguments, cancellationToken);
+                return $"Запустил тулз {action.Target}: {toolOutput}";
             default:
                 throw new InvalidOperationException($"Unsupported agent action: {action.Type}");
         }
     }
 
-    private static string BuildAnalysisPrompt(AgentSessionState session, string prompt, int step)
+    private static string BuildAnalysisPrompt(
+        AgentSessionState session,
+        string prompt,
+        int step,
+        DesktopContextSnapshot context,
+        string clipboardPreview)
     {
-        return $"Текущий запрос пользователя: {prompt}\nНомер шага: {step}\nИстория диалога:\n{string.Join("\n", session.History.TakeLast(12))}\nДай краткую мысль о следующем шаге.";
+        return $"Текущий запрос пользователя: {prompt}\nНомер шага: {step}\nИстория диалога:\n{string.Join("\n", session.History.TakeLast(12))}\nТекущий desktop context:\n{context.ToPromptString(clipboardPreview)}\nДай краткую мысль о следующем шаге.";
     }
 
-    private static string BuildDecisionSystemPrompt()
+    private static string BuildDecisionSystemPrompt(string toolPrompt)
     {
-        return """
+        return $"""
 Ты desktop-агент на Windows. Ты работаешь пошагово: смотришь на экран, думаешь, делаешь одно действие, потом снова смотришь.
 Никогда не пытайся решить всю задачу одним сообщением.
 Отвечай строго JSON-объектом без markdown.
 
 Формат:
-{
+{{
   "thought": "краткая мысль на русском",
-  "action": {
-    "type": "observe|open_app|type_text|press_key|key_combo|click|wait|finish",
+  "action": {{
+    "type": "observe|open_app|open_url|open_path|type_text|set_clipboard|paste_clipboard|copy_selection|press_key|key_combo|click|wait|run_tool|finish",
     "target": "строка или null",
     "text": "строка или null",
     "key": "строка или null",
     "keys": ["строки"] или null,
     "x": число или null,
     "y": число или null,
-    "milliseconds": число или null
-  },
+    "milliseconds": число или null,
+    "arguments": {{"key":"value"}} или null
+  }},
   "final_response": "строка или null"
-}
+}}
 
 Правила:
 - Делай ровно одно действие за шаг.
 - Если нужно открыть приложение, используй open_app.
-- Если нужно ввести текст в уже активное окно, используй type_text.
+- Если нужно открыть сайт, используй open_url.
+- Если нужно открыть файл или папку, используй open_path.
+- Если нужно ввести текст в активное окно, используй type_text.
+- Если нужно положить текст в буфер обмена, используй set_clipboard.
+- Если нужно вставить буфер обмена, используй paste_clipboard.
+- Если нужно скопировать выделение, используй copy_selection.
 - Если нужно нажать Enter/Tab/Escape и т.п., используй press_key.
 - Если нужно сочетание клавиш, используй key_combo.
 - Если нужно нажать в конкретную точку на скрине, используй click. Координаты относительные к присланному изображению.
+- Если нужно запустить runtime tool, используй run_tool, где target = id тулза, а arguments = объект параметров.
 - Если задача завершена, используй finish и дай final_response.
 - Если сперва нужно просто посмотреть/подтвердить состояние, используй observe.
+- Если скриншота нет, опирайся на текстовый desktop context: foreground window, список окон, буфер обмена и историю.
+
+{toolPrompt}
 """;
     }
 
-    private static string BuildDecisionUserPrompt(AgentSessionState session, string prompt, int step, ScreenSnapshot snapshot, string analysis)
+    private static string BuildDecisionUserPrompt(
+        AgentSessionState session,
+        string prompt,
+        int step,
+        ScreenSnapshot snapshot,
+        DesktopContextSnapshot context,
+        string clipboardPreview,
+        string analysis,
+        bool screenshotAttached)
     {
         var history = string.Join("\n", session.History.TakeLast(12));
         return $"""
 Текущий запрос пользователя: {prompt}
 Номер шага: {step}
 Размер скриншота: {snapshot.Width}x{snapshot.Height}
+Скриншот приложен: {(screenshotAttached ? "да" : "нет")}
 История этой сессии:
 {history}
+
+Desktop context:
+{context.ToPromptString(clipboardPreview)}
 
 Дополнительный анализ:
 {analysis}
 
-Посмотри на скриншот и выбери ОДИН следующий шаг.
+Выбери ОДИН следующий шаг.
 """;
     }
 
@@ -216,7 +346,15 @@ public sealed class AgentLoopService
 
         decision.Action ??= new AgentAction { Type = "observe" };
         decision.Action.Type = string.IsNullOrWhiteSpace(decision.Action.Type) ? "observe" : decision.Action.Type.Trim().ToLowerInvariant();
+        decision.Action.Arguments ??= [];
         return decision;
+    }
+
+    private static bool LooksLikeImageCapabilityFailure(Exception exception)
+    {
+        return exception.Message.Contains("image input is not enabled", StringComparison.OrdinalIgnoreCase) ||
+               exception.Message.Contains("vision", StringComparison.OrdinalIgnoreCase) ||
+               exception.Message.Contains("multimodal", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void AppendThought(StringBuilder builder, int step, string line)
@@ -273,6 +411,8 @@ public sealed class AgentAction
     public int? Milliseconds { get; set; }
 
     public string? FinalResponse { get; set; }
+
+    public Dictionary<string, string>? Arguments { get; set; }
 }
 
 public sealed record AgentLoopProgress(string Status, string Thinking, string Answer);
