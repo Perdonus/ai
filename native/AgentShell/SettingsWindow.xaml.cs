@@ -1,5 +1,7 @@
+using System.Runtime.InteropServices;
 using AgentShell.Models;
 using AgentShell.Services;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -13,46 +15,74 @@ public sealed partial class SettingsWindow : Window
     private readonly ShellConfigService _config = App.ConfigService;
     private readonly RuntimeCatalogService _runtimeCatalog = App.RuntimeCatalog;
     private readonly IReadOnlyList<ProviderDescriptor> _providers = ProviderCatalog.All;
+    private readonly DispatcherQueue _dispatcherQueue;
 
     public SettingsWindow()
     {
         InitializeComponent();
+        _dispatcherQueue = DispatcherQueue;
         ConfigureWindow();
-        _ = LoadAsync();
+        HookCloseBehavior();
+        _ = LoadSafeAsync();
     }
 
     public void BringToFront()
     {
+        var hwnd = WindowNative.GetWindowHandle(this);
+        ShowWindow(hwnd, SwShow);
         Activate();
+        SetForegroundWindow(hwnd);
     }
 
     private void ConfigureWindow()
     {
-        var appWindow = AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowNative.GetWindowHandle(this)));
+        var appWindow = GetAppWindow();
+        appWindow.Title = "AI Agent Settings";
         appWindow.Resize(new Windows.Graphics.SizeInt32(980, 760));
     }
 
-    private async Task LoadAsync()
+    private void HookCloseBehavior()
     {
-        ProvidersList.ItemsSource = _providers;
+        GetAppWindow().Closing += SettingsWindow_Closing;
+    }
 
-        BindRouteSelector(PrimaryProviderCombo, _config.Current.Models.Primary);
-        BindRouteSelector(AnalysisProviderCombo, _config.Current.Models.Analysis);
-        BindRouteSelector(VisionProviderCombo, _config.Current.Models.Vision);
-        BindRouteSelector(OcrProviderCombo, _config.Current.Models.Ocr);
+    private async Task LoadSafeAsync()
+    {
+        try
+        {
+            await EnqueueOnUiAsync(() =>
+            {
+                ProvidersList.ItemsSource = _providers;
 
-        SeparateAnalysisToggle.IsChecked = _config.Current.Models.UseSeparateAnalysis;
-        SeparateVisionToggle.IsChecked = _config.Current.Models.UseSeparateVision;
-        SeparateOcrToggle.IsChecked = _config.Current.Models.UseSeparateOcr;
-        ApplySeparateRouteVisibility();
+                BindRouteSelector(PrimaryProviderCombo, _config.Current.Models.Primary);
+                BindRouteSelector(AnalysisProviderCombo, _config.Current.Models.Analysis);
+                BindRouteSelector(VisionProviderCombo, _config.Current.Models.Vision);
+                BindRouteSelector(OcrProviderCombo, _config.Current.Models.Ocr);
 
-        await LoadModelChoicesAsync(PrimaryProviderCombo, PrimaryModelCombo, _config.Current.Models.Primary.Model);
-        await LoadModelChoicesAsync(AnalysisProviderCombo, AnalysisModelCombo, _config.Current.Models.Analysis.Model);
-        await LoadModelChoicesAsync(VisionProviderCombo, VisionModelCombo, _config.Current.Models.Vision.Model);
-        await LoadModelChoicesAsync(OcrProviderCombo, OcrModelCombo, _config.Current.Models.Ocr.Model);
+                SeparateAnalysisToggle.IsChecked = _config.Current.Models.UseSeparateAnalysis;
+                SeparateVisionToggle.IsChecked = _config.Current.Models.UseSeparateVision;
+                SeparateOcrToggle.IsChecked = _config.Current.Models.UseSeparateOcr;
+                ApplySeparateRouteVisibility();
+            });
 
-        ToolsList.ItemsSource = await _runtimeCatalog.LoadToolsAsync();
-        WidgetsList.ItemsSource = await _runtimeCatalog.LoadWidgetsAsync();
+            await LoadModelChoicesAsync(PrimaryProviderCombo, PrimaryModelCombo, _config.Current.Models.Primary.Model);
+            await LoadModelChoicesAsync(AnalysisProviderCombo, AnalysisModelCombo, _config.Current.Models.Analysis.Model);
+            await LoadModelChoicesAsync(VisionProviderCombo, VisionModelCombo, _config.Current.Models.Vision.Model);
+            await LoadModelChoicesAsync(OcrProviderCombo, OcrModelCombo, _config.Current.Models.Ocr.Model);
+
+            var tools = await _runtimeCatalog.LoadToolsAsync();
+            var widgets = await _runtimeCatalog.LoadWidgetsAsync();
+
+            await EnqueueOnUiAsync(() =>
+            {
+                ToolsList.ItemsSource = tools;
+                WidgetsList.ItemsSource = widgets;
+            });
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Error($"Settings load failed: {ex}");
+        }
     }
 
     private void BindRouteSelector(ComboBox comboBox, ModelRoute route)
@@ -64,17 +94,49 @@ public sealed partial class SettingsWindow : Window
 
     private async Task LoadModelChoicesAsync(ComboBox providerCombo, ComboBox modelCombo, string selectedModel)
     {
-        if (providerCombo.SelectedItem is not ProviderDescriptor provider)
+        ProviderDescriptor? provider = null;
+        await EnqueueOnUiAsync(() =>
+        {
+            provider = providerCombo.SelectedItem as ProviderDescriptor;
+            modelCombo.PlaceholderText = "Loading models...";
+            modelCombo.ItemsSource = null;
+            modelCombo.SelectedItem = null;
+        });
+
+        if (provider is null)
         {
             return;
         }
 
-        modelCombo.PlaceholderText = "Loading models...";
         var apiKey = _config.Current.Providers.GetValueOrDefault(provider.Id)?.ApiKey ?? string.Empty;
-        var models = await _modelDiscovery.LoadModelsAsync(provider, apiKey);
-        modelCombo.ItemsSource = models;
-        modelCombo.SelectedItem = models.FirstOrDefault(model => model == selectedModel) ?? models.FirstOrDefault();
-        modelCombo.PlaceholderText = models.Count == 0 ? "Enter provider API key first" : "Choose model";
+        IReadOnlyList<string> models;
+        var placeholder = "Choose model";
+
+        try
+        {
+            models = await _modelDiscovery.LoadModelsAsync(provider, apiKey);
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                placeholder = "Enter provider API key first";
+            }
+            else if (models.Count == 0)
+            {
+                placeholder = "No models available";
+            }
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Error($"Model load failed for provider {provider.Id}: {ex}");
+            models = [];
+            placeholder = "Failed to load models";
+        }
+
+        await EnqueueOnUiAsync(() =>
+        {
+            modelCombo.ItemsSource = models;
+            modelCombo.SelectedItem = models.FirstOrDefault(model => model == selectedModel) ?? models.FirstOrDefault();
+            modelCombo.PlaceholderText = placeholder;
+        });
     }
 
     private void ShowTab(FrameworkElement view)
@@ -189,4 +251,47 @@ public sealed partial class SettingsWindow : Window
         var model = modelCombo.SelectedItem as string ?? string.Empty;
         return new ModelRoute(provider, model);
     }
+
+    private Task EnqueueOnUiAsync(Action action)
+    {
+        var tcs = new TaskCompletionSource();
+        if (!_dispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    action();
+                    tcs.SetResult();
+                }
+                catch (Exception ex)
+                {
+                    tcs.SetException(ex);
+                }
+            }))
+        {
+            tcs.SetException(new InvalidOperationException("Failed to enqueue work on the UI dispatcher."));
+        }
+
+        return tcs.Task;
+    }
+
+    private void SettingsWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        args.Cancel = true;
+        StartupLogService.Info("Settings close intercepted, hiding instead.");
+        ShowWindow(WindowNative.GetWindowHandle(this), SwHide);
+    }
+
+    private AppWindow GetAppWindow()
+    {
+        return AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowNative.GetWindowHandle(this)));
+    }
+
+    private const int SwHide = 0;
+    private const int SwShow = 5;
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(nint hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint hWnd);
 }

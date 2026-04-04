@@ -1,5 +1,6 @@
 using AgentShell.Services;
 using Microsoft.UI.Xaml;
+using System.Runtime.InteropServices;
 
 namespace AgentShell;
 
@@ -44,10 +45,19 @@ public partial class App : Application
 
     public static void ShowSettings()
     {
-        Settings ??= new SettingsWindow();
-        StartupLogService.Info("Settings window opened.");
-        Settings.Activate();
-        Settings.BringToFront();
+        try
+        {
+            Settings ??= new SettingsWindow();
+            StartupLogService.Info("Settings window opened.");
+            Settings.BringToFront();
+        }
+        catch (COMException ex)
+        {
+            StartupLogService.Warn($"Settings window recreation requested after COM failure: {ex.Message}");
+            Settings = new SettingsWindow();
+            StartupLogService.Info("Settings window reopened with a fresh instance.");
+            Settings.BringToFront();
+        }
     }
 
     private void App_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
