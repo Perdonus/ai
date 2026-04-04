@@ -42,6 +42,36 @@
       "name": "Search Files",
       "description": "Search for files by name under a root folder.",
       "folder": "tools/search-files"
+    },
+    {
+      "id": "list-directory",
+      "name": "List Directory",
+      "description": "List files and folders inside a target directory.",
+      "folder": "tools/list-directory"
+    },
+    {
+      "id": "read-text-file",
+      "name": "Read Text File",
+      "description": "Read a text file with cmd type.",
+      "folder": "tools/read-text-file"
+    },
+    {
+      "id": "open-folder",
+      "name": "Open Folder",
+      "description": "Open a folder in Windows Explorer.",
+      "folder": "tools/open-folder"
+    },
+    {
+      "id": "kill-process",
+      "name": "Kill Process",
+      "description": "Force-stop a running process by image name.",
+      "folder": "tools/kill-process"
+    },
+    {
+      "id": "git-pull",
+      "name": "Git Pull",
+      "description": "Run git pull --ff-only inside a repository.",
+      "folder": "tools/git-pull"
     }
   ]
 }

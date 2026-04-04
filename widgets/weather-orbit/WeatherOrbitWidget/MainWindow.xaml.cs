@@ -203,8 +203,8 @@ public partial class MainWindow : Window
     {
         AnimateAutoReverse((ScaleTransform)SkyGlow.RenderTransform, ScaleTransform.ScaleXProperty, 1, 1.07, 3200);
         AnimateAutoReverse((ScaleTransform)SkyGlow.RenderTransform, ScaleTransform.ScaleYProperty, 1, 1.07, 3200);
-        AnimateCanvasLeft(CloudOne, 28, 36, 3600);
-        AnimateCanvasLeft(CloudTwo, 72, 60, 4200);
+        AnimateAutoReverse((TranslateTransform)CloudOne.RenderTransform, TranslateTransform.XProperty, 0, 8, 3600);
+        AnimateAutoReverse((TranslateTransform)CloudTwo.RenderTransform, TranslateTransform.XProperty, 0, -12, 4200);
     }
 
     private void SpawnDrop(Point point)
@@ -313,16 +313,6 @@ public partial class MainWindow : Window
             RepeatBehavior = RepeatBehavior.Forever
         };
         target.BeginAnimation(property, animation);
-    }
-
-    private static void AnimateCanvasLeft(FrameworkElement element, double from, double to, int milliseconds)
-    {
-        var animation = new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(milliseconds))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever
-        };
-        element.BeginAnimation(Canvas.LeftProperty, animation);
     }
 
     private static void AnimateDouble(Animatable target, DependencyProperty property, double from, double to, int milliseconds)

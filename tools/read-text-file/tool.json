@@ -1,0 +1,17 @@
+{
+  "id": "read-text-file",
+  "name": "Read Text File",
+  "description": "Read a text file with cmd type.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this only for plain text files when you need their exact current contents.",
+  "parameter_hints": {
+    "path": "absolute text file path"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "type \"{{path}}\""
+  ],
+  "version": "0.1.0"
+}

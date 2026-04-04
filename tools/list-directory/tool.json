@@ -1,0 +1,17 @@
+{
+  "id": "list-directory",
+  "name": "List Directory",
+  "description": "List files and folders inside a target directory.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this before editing, opening, or deleting files when you need to inspect a folder quickly.",
+  "parameter_hints": {
+    "path": "absolute folder path"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "dir /b /a \"{{path}}\""
+  ],
+  "version": "0.1.0"
+}

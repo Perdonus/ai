@@ -1,0 +1,17 @@
+{
+  "id": "git-pull",
+  "name": "Git Pull",
+  "description": "Run git pull --ff-only inside a repository.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this to update an existing repository without creating merge commits.",
+  "parameter_hints": {
+    "repo_path": "absolute repository path"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "cd /d \"{{repo_path}}\" && git pull --ff-only"
+  ],
+  "version": "0.1.0"
+}

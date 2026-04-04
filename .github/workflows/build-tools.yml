@@ -12,6 +12,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+permissions:
+  contents: write
+
 jobs:
   package-tools:
     runs-on: windows-latest
@@ -43,3 +46,27 @@ jobs:
           name: tools-packages
           path: tool-dist/*.zip
           if-no-files-found: error
+
+      - name: Stage tool package branch
+        if: success()
+        shell: pwsh
+        run: |
+          Copy-Item -LiteralPath 'tools-catalog.json' -Destination 'tool-dist/tools-catalog.json' -Force
+          $builtAt = (Get-Date).ToUniversalTime().ToString('o')
+          @"
+          {
+            "run_id": "${{ github.run_id }}",
+            "run_number": "${{ github.run_number }}",
+            "sha": "${{ github.sha }}",
+            "built_at_utc": "$builtAt"
+          }
+          "@ | Set-Content -LiteralPath 'tool-dist/build-info.json' -Encoding UTF8
+
+      - name: Publish tool package branch
+        if: success()
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: dist-tools
+          publish_dir: tool-dist
+          force_orphan: true

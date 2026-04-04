@@ -1,0 +1,17 @@
+{
+  "id": "kill-process",
+  "name": "Kill Process",
+  "description": "Force-stop a running process by image name.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this only when the user explicitly wants an app closed or when a stuck process blocks progress.",
+  "parameter_hints": {
+    "image_name": "process image name like notepad.exe"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "taskkill /IM \"{{image_name}}\" /F"
+  ],
+  "version": "0.1.0"
+}
