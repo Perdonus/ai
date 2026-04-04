@@ -89,7 +89,7 @@ public sealed class AgentLoopService
             if (simpleOpenRequest &&
                 decision.Action.Type == "open_app" &&
                 !string.IsNullOrWhiteSpace(decision.Action.Target) &&
-                IsAppLikelyRunning(decision.Action.Target))
+                await OpenedAppLooksReadyAsync(decision.Action.Target, cancellationToken))
             {
                 finalAnswer = $"Открыл {decision.Action.Target}.";
                 session.History.Add($"Ассистент: {finalAnswer}");
@@ -310,6 +310,8 @@ public sealed class AgentLoopService
 - Если нужно нажать в конкретную точку на скрине, используй click. Координаты относительные к присланному изображению.
 - Если нужно запустить runtime tool, используй run_tool, где target = id тулза, а arguments = объект параметров.
 - Если задача завершена, используй finish и дай final_response.
+- Не придумывай лишние действия. Если пользователь просил только открыть приложение, сайт, файл или папку, после успешного открытия сразу заверши задачу.
+- Не используй type_text, set_clipboard, paste_clipboard или copy_selection, если пользователь прямо не просил текст, ввод или работу с буфером.
 - Если сперва нужно просто посмотреть/подтвердить состояние, используй observe.
 - Если скриншота нет, опирайся на текстовый desktop context: foreground window, список окон, буфер обмена и историю.
 
@@ -381,6 +383,21 @@ Desktop context:
                normalized.StartsWith("запусти ", StringComparison.OrdinalIgnoreCase) ||
                normalized.StartsWith("open ", StringComparison.OrdinalIgnoreCase) ||
                normalized.StartsWith("launch ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<bool> OpenedAppLooksReadyAsync(string target, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            if (IsAppLikelyRunning(target))
+            {
+                return true;
+            }
+
+            await _input.WaitAsync(200, cancellationToken);
+        }
+
+        return false;
     }
 
     private static bool IsAppLikelyRunning(string target)
