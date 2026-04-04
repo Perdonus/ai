@@ -20,6 +20,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     private const int SwHide = 0;
     private const int SwShow = 5;
     private const uint TransparentKeyColor = 0x00030201;
+    private const uint DwmwaExtendedFrameBounds = 9;
 
     private readonly Window _window = window;
     private readonly FrameworkElement _animatedRoot = animatedRoot;
@@ -52,6 +53,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     {
         _expanded = false;
         _appWindow.Resize(new SizeInt32(CompactWidth, CompactHeight));
+        ApplyWindowRegion();
         StartupLogService.Info($"Launcher size mode set to compact {CompactWidth}x{CompactHeight}.");
     }
 
@@ -63,6 +65,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         var desiredHeight = CompactHeight + ExpandedExtraHeight + (int)Math.Ceiling(Math.Max(0, desiredConversationHeight));
         var height = Math.Clamp(desiredHeight, MinExpandedHeight, maxWindowHeight);
         _appWindow.Resize(new SizeInt32(ExpandedWidth, height));
+        ApplyWindowRegion();
         StartupLogService.Info($"Launcher size mode set to expanded {ExpandedWidth}x{height}. desiredConversationHeight={desiredConversationHeight:0.##}; maxWindowHeight={maxWindowHeight}.");
     }
 
@@ -102,6 +105,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
             _ = ShowWindow(hwnd, SwShow);
             _window.Activate();
             BringToFront();
+            ApplyWindowRegion();
         }
 
         visual.StartAnimation("Offset", offset);
@@ -193,6 +197,47 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         StartupLogService.Info("Launcher layered transparency enabled.");
     }
 
+    private void ApplyWindowRegion()
+    {
+        var hwnd = WindowNative.GetWindowHandle(_window);
+        if (!GetWindowRect(hwnd, out var windowRect))
+        {
+            StartupLogService.Warn($"Failed to read launcher window rect. win32={Marshal.GetLastWin32Error()}");
+            return;
+        }
+
+        var leftInset = 0;
+        var topInset = 0;
+        var rightInset = 0;
+        var bottomInset = 0;
+
+        if (DwmGetWindowAttributeRect(hwnd, DwmwaExtendedFrameBounds, out var visibleRect, Marshal.SizeOf<Rect>()) == 0)
+        {
+            leftInset = Math.Max(0, visibleRect.Left - windowRect.Left);
+            topInset = Math.Max(0, visibleRect.Top - windowRect.Top);
+            rightInset = Math.Max(0, windowRect.Right - visibleRect.Right);
+            bottomInset = Math.Max(0, windowRect.Bottom - visibleRect.Bottom);
+        }
+
+        var width = Math.Max(1, (windowRect.Right - windowRect.Left) - leftInset - rightInset);
+        var height = Math.Max(1, (windowRect.Bottom - windowRect.Top) - topInset - bottomInset);
+        var region = CreateRoundRectRgn(leftInset, topInset, leftInset + width + 1, topInset + height + 1, 60, 60);
+        if (region == nint.Zero)
+        {
+            StartupLogService.Warn($"Failed to create launcher region. win32={Marshal.GetLastWin32Error()}");
+            return;
+        }
+
+        if (!SetWindowRgn(hwnd, region, true))
+        {
+            _ = DeleteObject(region);
+            StartupLogService.Warn($"Failed to apply launcher region. win32={Marshal.GetLastWin32Error()}");
+            return;
+        }
+
+        StartupLogService.Info($"Launcher region applied. insets={leftInset},{topInset},{rightInset},{bottomInset}; window={windowRect.Right - windowRect.Left}x{windowRect.Bottom - windowRect.Top}; region={width}x{height}");
+    }
+
     private void SuppressWindowFrame()
     {
         var hwnd = WindowNative.GetWindowHandle(_window);
@@ -263,13 +308,37 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetLayeredWindowAttributes(nint hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowRect(nint hWnd, out Rect lpRect);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern nint CreateRoundRectRgn(int left, int top, int right, int bottom, int widthEllipse, int heightEllipse);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowRgn(nint hWnd, nint hRgn, bool bRedraw);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool DeleteObject(nint hObject);
+
     [DllImport("dwmapi.dll", SetLastError = true)]
     private static extern int DwmSetWindowAttribute(nint hwnd, uint dwAttribute, ref uint pvAttribute, int cbAttribute);
+
+    [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute", SetLastError = true)]
+    private static extern int DwmGetWindowAttributeRect(nint hwnd, uint dwAttribute, out Rect pvAttribute, int cbAttribute);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Point
     {
         public int X;
         public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
     }
 }

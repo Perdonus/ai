@@ -84,7 +84,8 @@ public sealed class GlobalHotkeyService : IDisposable
     {
         if (message == TrayCallbackMessage)
         {
-            TrayMessageReceived?.Invoke(this, new TrayIconMessageEventArgs(unchecked((uint)lParam.ToInt64())));
+            var trayMessage = unchecked((uint)(lParam.ToInt64() & 0xFFFF));
+            TrayMessageReceived?.Invoke(this, new TrayIconMessageEventArgs(trayMessage));
             return 0;
         }
 

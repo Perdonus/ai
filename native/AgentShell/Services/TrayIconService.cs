@@ -78,6 +78,8 @@ public sealed class TrayIconService : IDisposable
 
     private void HotkeyService_TrayMessageReceived(object? sender, TrayIconMessageEventArgs e)
     {
+        StartupLogService.Info($"Tray callback message received: 0x{e.Message:X4}");
+
         if (e.Message is WmLbuttonup or WmLbuttondblclk)
         {
             _openLauncher();
