@@ -1,0 +1,22 @@
+{
+  "id": "zip-folder",
+  "name": "Zip Folder",
+  "description": "Create a zip archive from a folder.",
+  "kind": "command",
+  "entry": "tar.exe",
+  "system_prompt": "Use this when you need to package a folder for export, backup, or upload.",
+  "parameter_hints": {
+    "zip_path": "absolute zip file path",
+    "source_path": "absolute source folder path"
+  },
+  "args_template": [
+    "-a",
+    "-c",
+    "-f",
+    "{{zip_path}}",
+    "-C",
+    "{{source_path}}",
+    "."
+  ],
+  "version": "0.1.0"
+}

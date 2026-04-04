@@ -1,0 +1,18 @@
+{
+  "id": "npm-run",
+  "name": "NPM Run",
+  "description": "Run an npm script inside a project.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this to build, test, or start JavaScript projects through package scripts.",
+  "parameter_hints": {
+    "repo_path": "absolute project path",
+    "script": "npm script name"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "cd /d \"{{repo_path}}\" && npm run {{script}}"
+  ],
+  "version": "0.1.0"
+}

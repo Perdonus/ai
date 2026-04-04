@@ -1,0 +1,17 @@
+{
+  "id": "browser-search",
+  "name": "Browser Search",
+  "description": "Open a web search in the default browser.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this when you need to search the web quickly in the user's browser. Pass a URL-encoded query.",
+  "parameter_hints": {
+    "query": "URL-encoded search query"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "start \"\" \"https://www.google.com/search?q={{query}}\""
+  ],
+  "version": "0.1.0"
+}

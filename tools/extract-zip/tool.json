@@ -1,0 +1,19 @@
+{
+  "id": "extract-zip",
+  "name": "Extract Zip",
+  "description": "Extract a zip archive into a destination folder.",
+  "kind": "command",
+  "entry": "tar.exe",
+  "system_prompt": "Use this after downloading packaged tools, widgets, or project artifacts.",
+  "parameter_hints": {
+    "zip_path": "absolute zip file path",
+    "destination_path": "absolute destination folder path"
+  },
+  "args_template": [
+    "-xf",
+    "{{zip_path}}",
+    "-C",
+    "{{destination_path}}"
+  ],
+  "version": "0.1.0"
+}

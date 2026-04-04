@@ -1,0 +1,18 @@
+{
+  "id": "git-add-commit",
+  "name": "Git Add And Commit",
+  "description": "Stage all changes and create a git commit.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this after code or content changes when a repository needs a non-interactive commit.",
+  "parameter_hints": {
+    "repo_path": "absolute repository path",
+    "message": "commit message"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "cd /d \"{{repo_path}}\" && git add -A && git commit -m \"{{message}}\""
+  ],
+  "version": "0.1.0"
+}

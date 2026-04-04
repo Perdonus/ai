@@ -1,0 +1,17 @@
+{
+  "id": "dotnet-build",
+  "name": "Dotnet Build",
+  "description": "Build a .NET project or solution.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this for .NET repositories when you need a straightforward build.",
+  "parameter_hints": {
+    "repo_path": "absolute project or solution folder path"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "cd /d \"{{repo_path}}\" && dotnet build"
+  ],
+  "version": "0.1.0"
+}
