@@ -1,9 +1,11 @@
 <Application
     x:Class="AgentShell.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls">
     <Application.Resources>
         <ResourceDictionary>
+            <controls:XamlControlsResources />
             <Color x:Key="ShellAccentColor">#FF90F0D0</Color>
             <Color x:Key="ShellPanelColor">#FF0E141D</Color>
             <Color x:Key="ShellPanelEdgeColor">#FF1E2938</Color>
