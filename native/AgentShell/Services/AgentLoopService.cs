@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AgentShell.Models;
 
 namespace AgentShell.Services;
@@ -373,8 +374,21 @@ Desktop context:
 
     private static bool LooksLikeSimpleOpenRequest(string prompt)
     {
-        var normalized = prompt.Trim().ToLowerInvariant();
-        if (normalized.Length > 80 || normalized.Contains('\n') || normalized.Contains(','))
+        var normalized = Regex.Replace(prompt.Trim().ToLowerInvariant(), "\\s+", " ");
+        if (normalized.Length > 80 ||
+            normalized.Contains('\n') ||
+            normalized.Contains(',') ||
+            normalized.Contains(';') ||
+            normalized.Contains(" и ", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains(" then ", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains(" потом ", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains(" затем ", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var words = normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length < 2 || words.Length > 4)
         {
             return false;
         }
