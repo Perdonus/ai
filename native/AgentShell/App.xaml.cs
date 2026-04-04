@@ -34,10 +34,19 @@ public partial class App : Application
 
             Launcher = new LauncherWindow();
             StartupLogService.Info("Launcher window created.");
-            _trayIcon = new TrayIconService(Launcher, OpenLauncher, Launcher.HotkeyService);
             Launcher.Activate();
             Launcher.HideAnimated(immediate: true);
             StartupLogService.Info("Launcher hidden immediately after activation.");
+
+            try
+            {
+                _trayIcon = new TrayIconService(Launcher, OpenLauncher, Launcher.HotkeyService);
+                StartupLogService.Info("Tray icon created.");
+            }
+            catch (Exception ex)
+            {
+                StartupLogService.Error($"Tray icon initialization failed: {ex}");
+            }
         }
         catch (Exception ex)
         {

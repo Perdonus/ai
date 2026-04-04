@@ -39,9 +39,14 @@ public sealed partial class SettingsWindow : Window
     {
         var appWindow = GetAppWindow();
         appWindow.Title = "AI Agent Settings";
-        appWindow.IsShownInSwitchers = false;
         appWindow.Resize(new Windows.Graphics.SizeInt32(980, 760));
-        ApplyToolWindowStyle();
+        if (appWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.SetBorderAndTitleBar(true, true);
+            presenter.IsResizable = true;
+            presenter.IsMaximizable = true;
+            presenter.IsMinimizable = true;
+        }
     }
 
     private void HookCloseBehavior()
@@ -428,26 +433,8 @@ public sealed partial class SettingsWindow : Window
         return AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowNative.GetWindowHandle(this)));
     }
 
-    private void ApplyToolWindowStyle()
-    {
-        var hwnd = WindowNative.GetWindowHandle(this);
-        var exStyle = GetWindowLongPtr(hwnd, GwlExstyle).ToInt64();
-        exStyle |= WsExToolwindow;
-        exStyle &= ~WsExAppwindow;
-        _ = SetWindowLongPtr(hwnd, GwlExstyle, new IntPtr(exStyle));
-    }
-
-    private const int GwlExstyle = -20;
-    private const long WsExToolwindow = 0x00000080L;
-    private const long WsExAppwindow = 0x00040000L;
     private const int SwHide = 0;
     private const int SwShow = 5;
-
-    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
-    private static extern IntPtr GetWindowLongPtr(nint hWnd, int nIndex);
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
-    private static extern IntPtr SetWindowLongPtr(nint hWnd, int nIndex, IntPtr dwNewLong);
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hWnd, int nCmdShow);

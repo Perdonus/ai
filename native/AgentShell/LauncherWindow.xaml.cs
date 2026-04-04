@@ -11,6 +11,7 @@ namespace AgentShell;
 public sealed partial class LauncherWindow : Window
 {
     private readonly AgentChatService _chatService = new();
+    private readonly DesktopActionService _desktopActions = new();
     private readonly GlobalHotkeyService _hotkey;
     private readonly WindowVisualService _visuals;
     private readonly DispatcherQueue _dispatcherQueue;
@@ -70,6 +71,15 @@ public sealed partial class LauncherWindow : Window
             return;
         }
 
+        if (HasConversationContent())
+        {
+            ApplyExpandedState(true);
+        }
+        else
+        {
+            ApplyExpandedState(false);
+        }
+
         StartupLogService.Info("Showing launcher.");
         _ignoreNextDeactivation = true;
         await _visuals.AnimateAsync(show: true);
@@ -116,12 +126,12 @@ public sealed partial class LauncherWindow : Window
         }
     }
 
-    private async void PromptBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    private void PromptBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
-            await SubmitPromptAsync();
             e.Handled = true;
+            _ = SubmitPromptAsync();
             return;
         }
 
@@ -141,9 +151,10 @@ public sealed partial class LauncherWindow : Window
         }
     }
 
-    private async void SendButton_Click(object sender, RoutedEventArgs e)
+    private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        await SubmitPromptAsync();
+        StartupLogService.Info("Launcher requested settings.");
+        App.ShowSettings();
     }
 
     private async Task SubmitPromptAsync()
@@ -169,41 +180,61 @@ public sealed partial class LauncherWindow : Window
         await EnqueueOnUiAsync(() =>
         {
             BusyRing.IsActive = true;
-            SendButton.IsEnabled = false;
-            SetStatus("Thinking...");
-            ThinkingPanel.Visibility = Visibility.Collapsed;
+            BusyRing.Visibility = Visibility.Visible;
+            OutputContainer.Visibility = Visibility.Visible;
+            ThinkingPanel.Visibility = Visibility.Visible;
+            ThinkingText.Text = "Думаю...";
             AnswerPanel.Visibility = Visibility.Collapsed;
             ErrorText.Visibility = Visibility.Collapsed;
             ErrorText.Text = string.Empty;
-            ThinkingText.Text = string.Empty;
             AnswerText.Text = string.Empty;
-        });
-
-        var progress = new Progress<AgentTurnProgress>(update =>
-        {
-            _ = EnqueueOnUiAsync(() =>
-            {
-                if (!string.IsNullOrWhiteSpace(update.Status))
-                {
-                    SetStatus(update.Status);
-                }
-
-                if (!string.IsNullOrWhiteSpace(update.Thinking))
-                {
-                    ThinkingText.Text = update.Thinking;
-                    ThinkingPanel.Visibility = Visibility.Visible;
-                }
-
-                if (!string.IsNullOrWhiteSpace(update.Answer))
-                {
-                    AnswerText.Text = update.Answer;
-                    AnswerPanel.Visibility = Visibility.Visible;
-                }
-            });
+            ApplyExpandedState(true);
+            SetStatus("Thinking...");
         });
 
         try
         {
+            var localAction = await _desktopActions.TryHandleAsync(prompt, _promptCts.Token);
+            if (localAction is not null)
+            {
+                await EnqueueOnUiAsync(() =>
+                {
+                    ThinkingText.Text = "Локальное действие выполнено.";
+                    ThinkingPanel.Visibility = Visibility.Visible;
+                    AnswerText.Text = localAction.Message;
+                    AnswerPanel.Visibility = Visibility.Visible;
+                    SetStatus("Ready");
+                });
+
+                return;
+            }
+
+            var progress = new Progress<AgentTurnProgress>(update =>
+            {
+                _ = EnqueueOnUiAsync(() =>
+                {
+                    OutputContainer.Visibility = Visibility.Visible;
+                    ApplyExpandedState(true);
+
+                    if (!string.IsNullOrWhiteSpace(update.Status))
+                    {
+                        SetStatus(update.Status);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(update.Thinking))
+                    {
+                        ThinkingText.Text = update.Thinking;
+                        ThinkingPanel.Visibility = Visibility.Visible;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(update.Answer))
+                    {
+                        AnswerText.Text = update.Answer;
+                        AnswerPanel.Visibility = Visibility.Visible;
+                    }
+                });
+            });
+
             var result = await _chatService.RunAsync(App.ConfigService.Current, prompt, progress, _promptCts.Token);
             await EnqueueOnUiAsync(() =>
             {
@@ -237,6 +268,7 @@ public sealed partial class LauncherWindow : Window
             {
                 ErrorText.Text = ex.Message;
                 ErrorText.Visibility = Visibility.Visible;
+                ThinkingPanel.Visibility = Visibility.Collapsed;
                 SetStatus("Request failed");
             });
         }
@@ -246,17 +278,15 @@ public sealed partial class LauncherWindow : Window
             await EnqueueOnUiAsync(() =>
             {
                 BusyRing.IsActive = false;
-                SendButton.IsEnabled = true;
+                BusyRing.Visibility = Visibility.Collapsed;
+                if (string.IsNullOrWhiteSpace(ThinkingText.Text))
+                {
+                    ThinkingPanel.Visibility = Visibility.Collapsed;
+                }
             });
 
             await FocusPromptAsync();
         }
-    }
-
-    private void SettingsButton_Click(object sender, RoutedEventArgs e)
-    {
-        StartupLogService.Info("Launcher requested settings.");
-        App.ShowSettings();
     }
 
     private void Hotkey_HotkeyPressed(object? sender, EventArgs e)
@@ -273,6 +303,16 @@ public sealed partial class LauncherWindow : Window
                 StartupLogService.Error($"Hotkey toggle failed: {ex}");
             }
         });
+    }
+
+    private void ApplyExpandedState(bool expanded)
+    {
+        _visuals.SetExpanded(expanded);
+        OutputContainer.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        if (_isVisible)
+        {
+            _visuals.MoveTopRight();
+        }
     }
 
     private async Task FocusPromptAsync()
@@ -311,6 +351,7 @@ public sealed partial class LauncherWindow : Window
     private void ResetOutput()
     {
         BusyRing.IsActive = false;
+        BusyRing.Visibility = Visibility.Collapsed;
         SetStatus("Ready");
         ThinkingText.Text = string.Empty;
         AnswerText.Text = string.Empty;
@@ -318,6 +359,7 @@ public sealed partial class LauncherWindow : Window
         ThinkingPanel.Visibility = Visibility.Collapsed;
         AnswerPanel.Visibility = Visibility.Collapsed;
         ErrorText.Visibility = Visibility.Collapsed;
+        ApplyExpandedState(false);
     }
 
     private Task EnqueueOnUiAsync(Action action)

@@ -11,9 +11,11 @@ namespace AgentShell.Services;
 
 public sealed class WindowVisualService(Window window, FrameworkElement animatedRoot)
 {
-    private const int LauncherWidth = 520;
-    private const int LauncherHeight = 340;
-    private const int VisibleMargin = 24;
+    private const int CompactWidth = 456;
+    private const int CompactHeight = 76;
+    private const int ExpandedWidth = 520;
+    private const int ExpandedHeight = 340;
+    private const int VisibleMargin = 18;
     private const int SwHide = 0;
     private const int SwShow = 5;
 
@@ -21,6 +23,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     private readonly FrameworkElement _animatedRoot = animatedRoot;
     private readonly DispatcherQueue _dispatcherQueue = window.DispatcherQueue;
     private readonly AppWindow _appWindow = AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowNative.GetWindowHandle(window)));
+    private bool _expanded;
 
     public void InitializeLauncherChrome()
     {
@@ -37,8 +40,17 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         }
 
         EnsureTaskbarWindowStyle();
-        _appWindow.Resize(new SizeInt32(LauncherWidth, LauncherHeight));
-        StartupLogService.Info($"Launcher chrome initialized with size {LauncherWidth}x{LauncherHeight}.");
+        SetExpanded(false);
+        StartupLogService.Info("Launcher chrome initialized.");
+    }
+
+    public void SetExpanded(bool expanded)
+    {
+        _expanded = expanded;
+        var width = expanded ? ExpandedWidth : CompactWidth;
+        var height = expanded ? ExpandedHeight : CompactHeight;
+        _appWindow.Resize(new SizeInt32(width, height));
+        StartupLogService.Info($"Launcher size mode set to {(expanded ? "expanded" : "compact")} {width}x{height}.");
     }
 
     public void HideImmediately()
@@ -55,8 +67,8 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
         var offset = compositor.CreateVector3KeyFrameAnimation();
         offset.Duration = TimeSpan.FromMilliseconds(show ? 180 : 140);
-        offset.InsertKeyFrame(0f, show ? new System.Numerics.Vector3(84, 0, 0) : new System.Numerics.Vector3(0, 0, 0));
-        offset.InsertKeyFrame(1f, show ? new System.Numerics.Vector3(0, 0, 0) : new System.Numerics.Vector3(84, 0, 0));
+        offset.InsertKeyFrame(0f, show ? new System.Numerics.Vector3(72, 0, 0) : new System.Numerics.Vector3(0, 0, 0));
+        offset.InsertKeyFrame(1f, show ? new System.Numerics.Vector3(0, 0, 0) : new System.Numerics.Vector3(72, 0, 0));
 
         var opacity = compositor.CreateScalarKeyFrameAnimation();
         opacity.Duration = offset.Duration;
@@ -81,6 +93,35 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         {
             await EnqueueAsync(HideImmediately);
         }
+    }
+
+    public void MoveTopRight()
+    {
+        var workArea = GetCurrentMonitorWorkArea();
+        var width = _appWindow.Size.Width;
+        var height = _appWindow.Size.Height;
+        var x = Math.Max(workArea.X, workArea.X + workArea.Width - width - VisibleMargin);
+        var y = Math.Max(workArea.Y, workArea.Y + VisibleMargin);
+        var maxY = workArea.Y + Math.Max(0, workArea.Height - height);
+        y = Math.Clamp(y, workArea.Y, maxY);
+
+        _appWindow.Move(new PointInt32(x, y));
+        StartupLogService.Info(
+            $"Launcher moved. expanded={_expanded}; workArea={workArea.X},{workArea.Y},{workArea.Width},{workArea.Height}; size={width}x{height}; target={x},{y}");
+    }
+
+    private RectInt32 GetCurrentMonitorWorkArea()
+    {
+        if (!GetCursorPos(out var cursor))
+        {
+            var fallback = DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+            return new RectInt32(fallback.X, fallback.Y, fallback.Width, fallback.Height);
+        }
+
+        var displayArea = DisplayArea.GetFromPoint(new PointInt32(cursor.X, cursor.Y), DisplayAreaFallback.Nearest);
+        var workArea = displayArea.WorkArea;
+        StartupLogService.Info($"Cursor position captured at {cursor.X},{cursor.Y}.");
+        return new RectInt32(workArea.X, workArea.Y, workArea.Width, workArea.Height);
     }
 
     private Task EnqueueAsync(Action action)
@@ -113,35 +154,6 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         exStyle &= ~WsExAppwindow;
         _ = SetWindowLongPtr(hwnd, GwlExstyle, new IntPtr(exStyle));
         StartupLogService.Info($"Launcher extended window style set to 0x{exStyle:X}.");
-    }
-
-    private void MoveTopRight()
-    {
-        var workArea = GetCurrentMonitorWorkArea();
-        var width = Math.Max(_appWindow.Size.Width, LauncherWidth);
-        var height = Math.Max(_appWindow.Size.Height, LauncherHeight);
-        var x = Math.Max(workArea.X, workArea.X + workArea.Width - width - VisibleMargin);
-        var y = Math.Max(workArea.Y, workArea.Y + VisibleMargin);
-        var maxY = workArea.Y + Math.Max(0, workArea.Height - height);
-        y = Math.Clamp(y, workArea.Y, maxY);
-
-        _appWindow.Move(new PointInt32(x, y));
-        StartupLogService.Info(
-            $"Launcher moved. workArea={workArea.X},{workArea.Y},{workArea.Width},{workArea.Height}; size={width}x{height}; target={x},{y}");
-    }
-
-    private RectInt32 GetCurrentMonitorWorkArea()
-    {
-        if (!GetCursorPos(out var cursor))
-        {
-            var fallback = DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary).WorkArea;
-            return new RectInt32(fallback.X, fallback.Y, fallback.Width, fallback.Height);
-        }
-
-        var displayArea = DisplayArea.GetFromPoint(new PointInt32(cursor.X, cursor.Y), DisplayAreaFallback.Nearest);
-        var workArea = displayArea.WorkArea;
-        StartupLogService.Info($"Cursor position captured at {cursor.X},{cursor.Y}.");
-        return new RectInt32(workArea.X, workArea.Y, workArea.Width, workArea.Height);
     }
 
     private void BringToFront()
