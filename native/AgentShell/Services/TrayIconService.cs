@@ -1,227 +1,97 @@
-using System.Runtime.InteropServices;
-using Microsoft.UI.Xaml;
-using WinRT.Interop;
+using DrawingIcon = System.Drawing.Icon;
+using Forms = System.Windows.Forms;
 
 namespace AgentShell.Services;
 
 public sealed class TrayIconService : IDisposable
 {
-    private const uint MfString = 0x00000000;
-    private const uint MfSeparator = 0x00000800;
-    private const uint TpmRightbutton = 0x0002;
-    private const uint TpmReturcmd = 0x0100;
-    private const uint NifMessage = 0x00000001;
-    private const uint NifIcon = 0x00000002;
-    private const uint NifTip = 0x00000004;
-    private const uint NimAdd = 0x00000000;
-    private const uint NimModify = 0x00000001;
-    private const uint NimDelete = 0x00000002;
-    private const uint NimSetversion = 0x00000004;
-    private const uint NotifyIconVersion4 = 4;
-    private const uint WmLbuttonup = 0x0202;
-    private const uint WmLbuttondblclk = 0x0203;
-    private const uint WmRbuttonup = 0x0205;
-    private const uint WmContextmenu = 0x007B;
-    private const uint WmNull = 0x0000;
-    private const uint OpenCommandId = 1001;
-    private const uint SettingsCommandId = 1002;
-    private const uint ExitCommandId = 1003;
-
     private readonly Action _openLauncher;
     private readonly Action _openSettings;
     private readonly Action _exitApplication;
-    private readonly GlobalHotkeyService _hotkeyService;
-    private readonly nint _hwnd;
-    private NotifyIconData _data;
+    private readonly Forms.ContextMenuStrip _menu;
+    private readonly Forms.NotifyIcon _notifyIcon;
+    private readonly DrawingIcon _trayIcon;
 
-    public TrayIconService(Window window, Action openLauncher, Action openSettings, Action exitApplication, GlobalHotkeyService hotkeyService)
+    public TrayIconService(Action openLauncher, Action openSettings, Action exitApplication)
     {
         _openLauncher = openLauncher;
         _openSettings = openSettings;
         _exitApplication = exitApplication;
-        _hotkeyService = hotkeyService;
-        _hotkeyService.TrayMessageReceived += HotkeyService_TrayMessageReceived;
-
-        _hwnd = WindowNative.GetWindowHandle(window);
-        _data = new NotifyIconData
+        _trayIcon = LoadIconForTray();
+        _menu = BuildContextMenu();
+        _notifyIcon = new Forms.NotifyIcon
         {
-            cbSize = (uint)Marshal.SizeOf<NotifyIconData>(),
-            hWnd = _hwnd,
-            uID = 1,
-            uFlags = NifMessage | NifIcon | NifTip,
-            uCallbackMessage = GlobalHotkeyService.TrayCallbackMessage,
-            hIcon = LoadIconForTray(),
-            szTip = "AI Agent",
-            szInfo = string.Empty,
-            szInfoTitle = string.Empty,
-            Anonymous = new NotifyIconDataTimeoutUnion
-            {
-                uVersion = NotifyIconVersion4
-            }
+            Text = "AI Agent",
+            Visible = true,
+            ContextMenuStrip = _menu,
+            Icon = _trayIcon
         };
 
-        CallShellNotifyIcon(NimAdd);
-        CallShellNotifyIcon(NimSetversion);
-        CallShellNotifyIcon(NimModify);
+        _notifyIcon.MouseClick += NotifyIcon_MouseClick;
+        _notifyIcon.MouseDoubleClick += NotifyIcon_MouseDoubleClick;
+        StartupLogService.Info("Tray icon initialized via WinForms NotifyIcon.");
     }
 
     public void Dispose()
     {
-        _hotkeyService.TrayMessageReceived -= HotkeyService_TrayMessageReceived;
-        CallShellNotifyIcon(NimDelete);
-        if (_data.hIcon != nint.Zero)
-        {
-            _ = DestroyIcon(_data.hIcon);
-            _data.hIcon = nint.Zero;
-        }
+        _notifyIcon.MouseClick -= NotifyIcon_MouseClick;
+        _notifyIcon.MouseDoubleClick -= NotifyIcon_MouseDoubleClick;
+        _notifyIcon.Visible = false;
+        _notifyIcon.Dispose();
+        _menu.Dispose();
+        _trayIcon.Dispose();
     }
 
-    private void HotkeyService_TrayMessageReceived(object? sender, TrayIconMessageEventArgs e)
+    private void NotifyIcon_MouseClick(object? sender, Forms.MouseEventArgs e)
     {
-        StartupLogService.Info($"Tray callback message received: 0x{e.Message:X4}");
-
-        if (e.Message is WmLbuttonup or WmLbuttondblclk)
+        StartupLogService.Info($"Tray click received: {e.Button}.");
+        if (e.Button == Forms.MouseButtons.Left)
         {
             _openLauncher();
-            return;
-        }
-
-        if (e.Message is WmRbuttonup or WmContextmenu)
-        {
-            ShowContextMenu();
         }
     }
 
-    private void ShowContextMenu()
+    private void NotifyIcon_MouseDoubleClick(object? sender, Forms.MouseEventArgs e)
     {
-        var menu = CreatePopupMenu();
-        if (menu == nint.Zero)
+        StartupLogService.Info($"Tray double click received: {e.Button}.");
+        if (e.Button == Forms.MouseButtons.Left)
         {
-            throw new InvalidOperationException("CreatePopupMenu failed.");
-        }
-
-        try
-        {
-            _ = AppendMenu(menu, MfString, OpenCommandId, "Открыть");
-            _ = AppendMenu(menu, MfString, SettingsCommandId, "Настройки");
-            _ = AppendMenu(menu, MfSeparator, 0, string.Empty);
-            _ = AppendMenu(menu, MfString, ExitCommandId, "Выход");
-
-            _ = SetForegroundWindow(_hwnd);
-            if (!GetCursorPos(out var point))
-            {
-                throw new InvalidOperationException("GetCursorPos failed for tray menu.");
-            }
-
-            var command = TrackPopupMenu(menu, TpmReturcmd | TpmRightbutton, point.X, point.Y, 0, _hwnd, nint.Zero);
-            _ = PostMessage(_hwnd, WmNull, 0, 0);
-
-            switch (command)
-            {
-                case OpenCommandId:
-                    _openLauncher();
-                    break;
-                case SettingsCommandId:
-                    _openSettings();
-                    break;
-                case ExitCommandId:
-                    _exitApplication();
-                    break;
-            }
-        }
-        finally
-        {
-            _ = DestroyMenu(menu);
+            _openLauncher();
         }
     }
 
-    private void CallShellNotifyIcon(uint message)
+    private Forms.ContextMenuStrip BuildContextMenu()
     {
-        if (!ShellNotifyIcon(message, ref _data))
+        var menu = new Forms.ContextMenuStrip
         {
-            throw new InvalidOperationException($"Shell_NotifyIconW failed for message 0x{message:X}.");
-        }
+            ShowImageMargin = false
+        };
+
+        menu.Items.Add("Открыть", null, (_, _) =>
+        {
+            StartupLogService.Info("Tray command: open.");
+            _openLauncher();
+        });
+        menu.Items.Add("Настройки", null, (_, _) =>
+        {
+            StartupLogService.Info("Tray command: settings.");
+            _openSettings();
+        });
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        menu.Items.Add("Выход", null, (_, _) =>
+        {
+            StartupLogService.Info("Tray command: exit.");
+            _exitApplication();
+        });
+
+        return menu;
     }
 
-    private static nint LoadIconForTray()
+    private static DrawingIcon LoadIconForTray()
     {
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
-        return File.Exists(iconPath) ? ExtractIconW(nint.Zero, iconPath, 0) : nint.Zero;
-    }
-
-    [DllImport("shell32.dll", EntryPoint = "Shell_NotifyIconW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool ShellNotifyIcon(uint dwMessage, ref NotifyIconData lpData);
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern nint ExtractIconW(nint hInst, string lpszExeFileName, int nIconIndex);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool DestroyIcon(nint hIcon);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern nint CreatePopupMenu();
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool AppendMenu(nint hMenu, uint uFlags, uint uIDNewItem, string lpNewItem);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool DestroyMenu(nint hMenu);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern uint TrackPopupMenu(nint hMenu, uint uFlags, int x, int y, int nReserved, nint hWnd, nint prcRect);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool GetCursorPos(out Point lpPoint);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetForegroundWindow(nint hWnd);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool PostMessage(nint hWnd, uint msg, nuint wParam, nint lParam);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Point
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct NotifyIconData
-    {
-        public uint cbSize;
-        public nint hWnd;
-        public uint uID;
-        public uint uFlags;
-        public uint uCallbackMessage;
-        public nint hIcon;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string szTip;
-
-        public uint dwState;
-        public uint dwStateMask;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
-        public string szInfo;
-
-        public NotifyIconDataTimeoutUnion Anonymous;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
-        public string szInfoTitle;
-
-        public uint dwInfoFlags;
-        public Guid guidItem;
-        public nint hBalloonIcon;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct NotifyIconDataTimeoutUnion
-    {
-        [FieldOffset(0)]
-        public uint uTimeout;
-
-        [FieldOffset(0)]
-        public uint uVersion;
+        return File.Exists(iconPath)
+            ? new DrawingIcon(iconPath)
+            : (DrawingIcon)System.Drawing.SystemIcons.Application.Clone();
     }
 }

@@ -40,7 +40,7 @@ public partial class App : Application
 
             try
             {
-                _trayIcon = new TrayIconService(Launcher, OpenLauncher, ShowSettings, ExitAgent, Launcher.HotkeyService);
+                _trayIcon = new TrayIconService(OpenLauncher, ShowSettings, ExitAgent);
                 StartupLogService.Info("Tray icon created.");
             }
             catch (Exception ex)
