@@ -4,6 +4,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Hosting;
 using Windows.Graphics;
+using System.Runtime.InteropServices;
 using WinRT.Interop;
 
 namespace AgentShell.Services;
@@ -22,15 +23,19 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
     public void InitializeLauncherChrome()
     {
+        _appWindow.Title = "AI Agent";
+        _appWindow.IsShownInSwitchers = true;
+
         if (_appWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.SetBorderAndTitleBar(false, false);
-            presenter.IsAlwaysOnTop = true;
+            presenter.IsAlwaysOnTop = false;
             presenter.IsResizable = false;
             presenter.IsMaximizable = false;
             presenter.IsMinimizable = false;
         }
 
+        EnsureTaskbarWindowStyle();
         _appWindow.Resize(new SizeInt32(LauncherWidth, LauncherHeight));
         StartupLogService.Info($"Launcher chrome initialized with size {LauncherWidth}x{LauncherHeight}.");
     }
@@ -108,4 +113,24 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
         return tcs.Task;
     }
+
+    private void EnsureTaskbarWindowStyle()
+    {
+        var hwnd = WindowNative.GetWindowHandle(_window);
+        var exStyle = GetWindowLongPtr(hwnd, GwlExstyle).ToInt64();
+        exStyle &= ~WsExToolwindow;
+        exStyle |= WsExAppwindow;
+        _ = SetWindowLongPtr(hwnd, GwlExstyle, new IntPtr(exStyle));
+        StartupLogService.Info($"Launcher extended window style set to 0x{exStyle:X}.");
+    }
+
+    private const int GwlExstyle = -20;
+    private const long WsExToolwindow = 0x00000080L;
+    private const long WsExAppwindow = 0x00040000L;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr(nint hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr(nint hWnd, int nIndex, IntPtr dwNewLong);
 }
