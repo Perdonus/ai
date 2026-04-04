@@ -1,19 +1,17 @@
 {
   "id": "open-terminal",
   "name": "Open Terminal",
-  "description": "Open PowerShell in a target folder.",
+  "description": "Open Command Prompt in a target folder.",
   "kind": "command",
-  "entry": "powershell",
-  "system_prompt": "Use this when the user wants an interactive PowerShell window opened in a specific folder.",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this when the user wants an interactive terminal window opened in a specific folder.",
   "parameter_hints": {
     "path": "absolute folder path"
   },
   "args_template": [
-    "-NoProfile",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-Command",
-    "Start-Process powershell -ArgumentList '-NoProfile','-NoExit','-Command','Set-Location -LiteralPath \"{{path}}\"'"
+    "/d",
+    "/c",
+    "start \"\" cmd.exe /k cd /d \"{{path}}\""
   ],
   "version": "0.1.0"
 }

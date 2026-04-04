@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Net;
 using System.Text;
@@ -10,10 +11,15 @@ public sealed class AgentChatService
 {
     private static readonly TimeSpan[] RetryDelays =
     [
-        TimeSpan.FromSeconds(4),
         TimeSpan.FromSeconds(8),
-        TimeSpan.FromSeconds(16)
+        TimeSpan.FromSeconds(16),
+        TimeSpan.FromSeconds(32),
+        TimeSpan.FromSeconds(48)
     ];
+
+    private static readonly TimeSpan RequestSpacing = TimeSpan.FromMilliseconds(1250);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ProviderLocks = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, DateTimeOffset> ProviderAvailableAt = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly HttpClient _httpClient = new()
     {
@@ -77,13 +83,14 @@ public sealed class AgentChatService
         CancellationToken cancellationToken)
     {
         var provider = ResolveProvider(route, config, out var apiKey);
+        var throttleKey = BuildThrottleKey(provider);
         StartupLogService.Info($"Running model request via {provider.Id}/{route.Model}.");
 
         return provider.Id switch
         {
-            "gemini" => await RequestGeminiAsync(provider, route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken),
-            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken),
-            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken)
+            "gemini" => await RequestGeminiAsync(provider, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken),
+            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", throttleKey, route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken),
+            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken)
         };
     }
 
@@ -96,12 +103,13 @@ public sealed class AgentChatService
         CancellationToken cancellationToken)
     {
         var provider = ResolveProvider(route, config, out var apiKey);
+        var throttleKey = BuildThrottleKey(provider);
         StartupLogService.Info($"Running agent step via {provider.Id}/{route.Model}. screenshot={screenshot is not null}");
         var raw = provider.Id switch
         {
-            "gemini" => await RequestGeminiAsync(provider, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
-            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
-            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken)
+            "gemini" => await RequestGeminiAsync(provider, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
+            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
+            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken)
         };
 
         return ExtractJsonObject(raw);
@@ -128,6 +136,7 @@ public sealed class AgentChatService
 
     private async Task<string> RequestOpenAiCompatibleAsync(
         string baseUrl,
+        string throttleKey,
         string model,
         string apiKey,
         string systemPrompt,
@@ -164,6 +173,7 @@ public sealed class AgentChatService
                 return request;
             },
             $"{baseUrl.TrimEnd('/')}/chat/completions",
+            throttleKey,
             cancellationToken);
 
         using var document = JsonDocument.Parse(body);
@@ -178,6 +188,7 @@ public sealed class AgentChatService
 
     private async Task<string> RequestGeminiAsync(
         ProviderDescriptor provider,
+        string throttleKey,
         string model,
         string apiKey,
         string systemPrompt,
@@ -226,6 +237,7 @@ public sealed class AgentChatService
                     "application/json")
             },
             url,
+            throttleKey,
             cancellationToken);
 
         using var document = JsonDocument.Parse(body);
@@ -251,31 +263,51 @@ public sealed class AgentChatService
     private async Task<string> SendRequestWithBackoffAsync(
         Func<HttpRequestMessage> requestFactory,
         string endpointLabel,
+        string throttleKey,
         CancellationToken cancellationToken)
     {
-        for (var attempt = 0; attempt <= RetryDelays.Length; attempt++)
+        var providerLock = ProviderLocks.GetOrAdd(throttleKey, static _ => new SemaphoreSlim(1, 1));
+        await providerLock.WaitAsync(cancellationToken);
+        try
         {
-            using var request = requestFactory();
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (response.IsSuccessStatusCode)
+            for (var attempt = 0; attempt <= RetryDelays.Length; attempt++)
             {
-                return body;
-            }
+                await WaitForProviderAvailabilityAsync(throttleKey, cancellationToken);
 
-            if (attempt < RetryDelays.Length && IsRetryable(response.StatusCode))
-            {
+                using var request = requestFactory();
+                using var response = await _httpClient.SendAsync(request, cancellationToken);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    ReserveProvider(throttleKey, RequestSpacing);
+                    return body;
+                }
+
                 var delay = GetRetryDelay(response, attempt);
-                StartupLogService.Warn(
-                    $"Provider throttled or failed temporarily on {endpointLabel}. status={(int)response.StatusCode}. retry_in={delay.TotalSeconds:0}s. attempt={attempt + 1}");
-                await Task.Delay(delay, cancellationToken);
-                continue;
-            }
+                if (attempt < RetryDelays.Length && IsRetryable(response.StatusCode))
+                {
+                    ReserveProvider(throttleKey, delay + RequestSpacing);
+                    StartupLogService.Warn(
+                        $"Provider throttled or failed temporarily on {endpointLabel}. provider={throttleKey}. status={(int)response.StatusCode}. retry_in={delay.TotalSeconds:0}s. attempt={attempt + 1}");
+                    await Task.Delay(delay, cancellationToken);
+                    continue;
+                }
 
-            var prefix = response.StatusCode == HttpStatusCode.TooManyRequests
-                ? "Provider request hit rate limit"
-                : "Provider request failed";
-            throw new InvalidOperationException($"{prefix}: {(int)response.StatusCode} {body}");
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    ReserveProvider(throttleKey, delay + TimeSpan.FromSeconds(4));
+                    throw new ProviderRateLimitException(throttleKey, delay, body);
+                }
+
+                var prefix = response.StatusCode == HttpStatusCode.TooManyRequests
+                    ? "Provider request hit rate limit"
+                    : "Provider request failed";
+                throw new InvalidOperationException($"{prefix}: {(int)response.StatusCode} {body}");
+            }
+        }
+        finally
+        {
+            providerLock.Release();
         }
 
         throw new InvalidOperationException("Provider request retry loop ended unexpectedly.");
@@ -316,9 +348,44 @@ public sealed class AgentChatService
             return TimeSpan.FromSeconds(2);
         }
 
-        return delay > TimeSpan.FromSeconds(30)
-            ? TimeSpan.FromSeconds(30)
+        return delay > TimeSpan.FromSeconds(90)
+            ? TimeSpan.FromSeconds(90)
             : delay;
+    }
+
+    private static string BuildThrottleKey(ProviderDescriptor provider)
+    {
+        return provider.Id.Trim().ToLowerInvariant();
+    }
+
+    private static async Task WaitForProviderAvailabilityAsync(string throttleKey, CancellationToken cancellationToken)
+    {
+        while (ProviderAvailableAt.TryGetValue(throttleKey, out var readyAt))
+        {
+            var delay = readyAt - DateTimeOffset.UtcNow;
+            if (delay <= TimeSpan.Zero)
+            {
+                ProviderAvailableAt.TryRemove(throttleKey, out _);
+                return;
+            }
+
+            StartupLogService.Info($"Waiting for provider cooldown. provider={throttleKey}; wait={delay.TotalSeconds:0.0}s");
+            await Task.Delay(delay, cancellationToken);
+        }
+    }
+
+    private static void ReserveProvider(string throttleKey, TimeSpan delay)
+    {
+        if (delay <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        var until = DateTimeOffset.UtcNow + ClampDelay(delay);
+        ProviderAvailableAt.AddOrUpdate(
+            throttleKey,
+            until,
+            (_, current) => current > until ? current : until);
     }
 
     private static string ParseContent(JsonElement content)
@@ -359,4 +426,11 @@ public sealed class AgentChatService
 
         return fenced[start..(end + 1)];
     }
+}
+
+public sealed class ProviderRateLimitException(string providerKey, TimeSpan retryAfter, string body)
+    : InvalidOperationException($"Provider {providerKey} is rate limited. Retry after about {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} seconds. {body}")
+{
+    public string ProviderKey { get; } = providerKey;
+    public TimeSpan RetryAfter { get; } = retryAfter;
 }

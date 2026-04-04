@@ -13,7 +13,7 @@ namespace AgentShell.Services;
 public sealed class WindowVisualService(Window window, FrameworkElement animatedRoot)
 {
     private const int CompactWidth = 500;
-    private const int CompactHeight = 72;
+    private const int CompactHeight = 66;
     private const int ExpandedWidth = 560;
     private const int ExpandedExtraHeight = 36;
     private const int MinExpandedHeight = 148;

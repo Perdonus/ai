@@ -20,6 +20,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
       - name: Validate and package widgets
         shell: pwsh
         run: |
@@ -28,10 +33,30 @@ jobs:
           $widgets = Get-ChildItem widgets -Directory
           foreach ($widget in $widgets) {
             $manifestPath = Join-Path $widget.FullName 'widget.json'
-            if (!(Test-Path $manifestPath)) { throw "Missing widget.json for $($widget.Name)" }
+            if (!(Test-Path $manifestPath)) { continue }
             $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-            $entry = Join-Path $widget.FullName $manifest.entry_html
-            if (!(Test-Path $entry)) { throw "Missing entry_html target for $($widget.Name): $entry" }
+            $kind = if ($manifest.kind) { $manifest.kind.ToString().ToLowerInvariant() } else { 'html' }
+
+            if ($kind -eq 'native') {
+              $project = Join-Path $widget.FullName $manifest.entry_project
+              if (!(Test-Path $project)) { throw "Missing entry_project for $($widget.Name): $project" }
+
+              $publishDir = Join-Path $widget.FullName 'dist'
+              if (Test-Path $publishDir) { Remove-Item -LiteralPath $publishDir -Recurse -Force }
+              dotnet publish $project -c Release -r win-x64 --self-contained true -o $publishDir
+              if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $($widget.Name)" }
+
+              $entry = Join-Path $widget.FullName $manifest.entry_executable
+              if (!(Test-Path $entry)) { throw "Missing entry_executable target for $($widget.Name): $entry" }
+            }
+            elseif ($kind -eq 'html') {
+              $entry = Join-Path $widget.FullName $manifest.entry_html
+              if (!(Test-Path $entry)) { throw "Missing entry_html target for $($widget.Name): $entry" }
+            }
+            else {
+              throw "Unsupported widget kind '$kind' for $($widget.Name)"
+            }
+
             Compress-Archive -Path (Join-Path $widget.FullName '*') -DestinationPath (Join-Path 'widget-dist' ($widget.Name + '.zip')) -Force
           }
 
@@ -41,4 +66,3 @@ jobs:
           name: widgets-packages
           path: widget-dist/*.zip
           if-no-files-found: error
-

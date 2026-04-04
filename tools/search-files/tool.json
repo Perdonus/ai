@@ -1,0 +1,18 @@
+{
+  "id": "search-files",
+  "name": "Search Files",
+  "description": "Search for files by name under a root folder.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this to find files quickly when you know the approximate name or pattern.",
+  "parameter_hints": {
+    "root": "absolute root folder path",
+    "pattern": "filename fragment or wildcard fragment"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "dir /s /b \"{{root}}\\*{{pattern}}*\""
+  ],
+  "version": "0.1.0"
+}

@@ -14,6 +14,7 @@ public sealed partial class SettingsWindow : Window
     private readonly ModelDiscoveryService _modelDiscovery = new();
     private readonly ShellConfigService _config = App.ConfigService;
     private readonly RuntimeCatalogService _runtimeCatalog = App.RuntimeCatalog;
+    private readonly RuntimeWidgetService _runtimeWidgets = new();
     private readonly IReadOnlyList<ProviderDescriptor> _providers = ProviderCatalog.All;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly SemaphoreSlim _saveLock = new(1, 1);
@@ -378,9 +379,22 @@ public sealed partial class SettingsWindow : Window
             "remove widget");
     }
 
-    private void TestWidget_Click(object sender, RoutedEventArgs e)
+    private async void TestWidget_Click(object sender, RoutedEventArgs e)
     {
-        OperationStatusText.Text = "Тест виджета пока заглушка.";
+        await RunUiSafeAsync(
+            () => TestWidgetAsync(sender),
+            "test widget");
+    }
+
+    private async Task TestWidgetAsync(object sender)
+    {
+        if (sender is not Button button || button.Tag is not string path || !Directory.Exists(path))
+        {
+            return;
+        }
+
+        var result = await _runtimeWidgets.TestLaunchAsync(path, CancellationToken.None);
+        await EnqueueOnUiAsync(() => OperationStatusText.Text = result);
     }
 
     private async Task RemoveRuntimeItemAsync(object sender, bool isWidget)

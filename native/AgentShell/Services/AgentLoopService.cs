@@ -35,6 +35,17 @@ public sealed class AgentLoopService
         var repeatedActionCount = 0;
         var lastActionSignature = string.Empty;
 
+        if (simpleOpenRequest)
+        {
+            var directResult = await _desktop.TryHandleAsync(prompt, cancellationToken);
+            if (directResult is not null)
+            {
+                AppendThought(visibleThoughts, 1, $"Локально распознала прямую команду: {directResult.Message}");
+                session.History.Add($"Ассистент: {directResult.Message}");
+                return new AgentLoopResult(visibleThoughts.ToString(), directResult.Message, string.Empty, false);
+            }
+        }
+
         for (var step = 1; step <= MaxSteps; step++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -46,95 +57,106 @@ public sealed class AgentLoopService
 
             string analysis = string.Empty;
             var analysisRoute = _chat.ResolveAnalysisRoute(config);
-            if (analysisRoute is not null)
+            try
             {
-                var analysisPrompt = BuildAnalysisPrompt(session, prompt, step, context, clipboardPreview);
-                analysis = await _chat.RequestTextAsync(
+                if (ShouldRunSeparateAnalysis(config, analysisRoute, step))
+                {
+                    var analysisPrompt = BuildAnalysisPrompt(session, prompt, step, context, clipboardPreview);
+                    analysis = await _chat.RequestTextAsync(
+                        config,
+                        analysisRoute!,
+                        "Ты внутренний анализатор desktop-агента Windows. Смотри на текущий контекст и скажи, какой один следующий шаг сейчас самый разумный. Пиши коротко, по-русски, без болтовни.",
+                        analysisPrompt,
+                        cancellationToken);
+
+                    if (_chat.ShouldShowAnalysisThinking(config))
+                    {
+                        AppendThought(visibleThoughts, step, analysis);
+                        progress?.Report(new AgentLoopProgress($"Шаг {step}: анализ", visibleThoughts.ToString(), finalAnswer));
+                    }
+                }
+
+                var decision = await DecideNextActionAsync(
                     config,
-                    analysisRoute,
-                    "Ты внутренний анализатор desktop-агента Windows. Смотри на текущий контекст и скажи, какой один следующий шаг сейчас самый разумный. Пиши коротко, по-русски, без болтовни.",
-                    analysisPrompt,
+                    session,
+                    prompt,
+                    step,
+                    snapshot,
+                    context,
+                    clipboardPreview,
+                    analysis,
+                    toolPrompt,
                     cancellationToken);
 
-                if (_chat.ShouldShowAnalysisThinking(config))
+                StartupLogService.Info(
+                    $"Step {step} decision: {decision.Action.Type}; target={decision.Action.Target ?? "(none)"}; thought={TrimForLog(decision.Thought)}");
+
+                if (_chat.ShouldShowPrimaryThinking(config) && !string.IsNullOrWhiteSpace(decision.Thought))
                 {
-                    AppendThought(visibleThoughts, step, analysis);
-                    progress?.Report(new AgentLoopProgress($"Шаг {step}: анализ", visibleThoughts.ToString(), finalAnswer));
+                    AppendThought(visibleThoughts, step, decision.Thought);
+                    progress?.Report(new AgentLoopProgress($"Шаг {step}: думаю", visibleThoughts.ToString(), finalAnswer));
+                }
+
+                if (decision.Action.Type == "await_user")
+                {
+                    finalAnswer = ResolveAwaitUserMessage(decision);
+                    session.History.Add($"Ассистент: {finalAnswer}");
+                    return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, true);
+                }
+
+                var actionSignature = BuildActionSignature(decision.Action);
+                if (actionSignature == lastActionSignature)
+                {
+                    repeatedActionCount++;
+                }
+                else
+                {
+                    lastActionSignature = actionSignature;
+                    repeatedActionCount = 1;
+                }
+
+                if (repeatedActionCount >= 3 && decision.Action.Type != "finish")
+                {
+                    finalAnswer = ResolveStuckMessage(decision);
+                    session.History.Add($"Ассистент: {finalAnswer}");
+                    return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, true);
+                }
+
+                var actionSummary = await ExecuteActionAsync(decision.Action, snapshot, cancellationToken);
+                session.History.Add($"Шаг {step}: {decision.Thought}");
+                session.History.Add($"Действие {step}: {actionSummary}");
+
+                if (!string.IsNullOrWhiteSpace(actionSummary))
+                {
+                    AppendThought(visibleThoughts, step, $"Действие: {actionSummary}");
+                    progress?.Report(new AgentLoopProgress($"Шаг {step}: действие", visibleThoughts.ToString(), finalAnswer));
+                }
+
+                if (simpleOpenRequest &&
+                    decision.Action.Type == "open_app" &&
+                    !string.IsNullOrWhiteSpace(decision.Action.Target) &&
+                    await OpenedAppLooksReadyAsync(decision.Action.Target, cancellationToken))
+                {
+                    finalAnswer = $"Открыл {decision.Action.Target}.";
+                    session.History.Add($"Ассистент: {finalAnswer}");
+                    return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
+                }
+
+                if (decision.Action.Type == "finish")
+                {
+                    finalAnswer = string.IsNullOrWhiteSpace(decision.FinalResponse)
+                        ? "Готово."
+                        : decision.FinalResponse;
+                    session.History.Add($"Ассистент: {finalAnswer}");
+                    return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
                 }
             }
-
-            var decision = await DecideNextActionAsync(
-                config,
-                session,
-                prompt,
-                step,
-                snapshot,
-                context,
-                clipboardPreview,
-                analysis,
-                toolPrompt,
-                cancellationToken);
-
-            StartupLogService.Info(
-                $"Step {step} decision: {decision.Action.Type}; target={decision.Action.Target ?? "(none)"}; thought={TrimForLog(decision.Thought)}");
-
-            if (_chat.ShouldShowPrimaryThinking(config) && !string.IsNullOrWhiteSpace(decision.Thought))
+            catch (ProviderRateLimitException ex)
             {
-                AppendThought(visibleThoughts, step, decision.Thought);
-                progress?.Report(new AgentLoopProgress($"Шаг {step}: думаю", visibleThoughts.ToString(), finalAnswer));
-            }
-
-            if (decision.Action.Type == "await_user")
-            {
-                finalAnswer = ResolveAwaitUserMessage(decision);
+                finalAnswer = $"Уперлась в лимит провайдера {ex.ProviderKey}. Я остановилась и не стала спамить запросы. Подожди примерно {Math.Max(1, (int)Math.Ceiling(ex.RetryAfter.TotalSeconds))} с и повтори запрос.";
+                AppendThought(visibleThoughts, step, finalAnswer);
                 session.History.Add($"Ассистент: {finalAnswer}");
-                return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, true);
-            }
-
-            var actionSignature = BuildActionSignature(decision.Action);
-            if (actionSignature == lastActionSignature)
-            {
-                repeatedActionCount++;
-            }
-            else
-            {
-                lastActionSignature = actionSignature;
-                repeatedActionCount = 1;
-            }
-
-            if (repeatedActionCount >= 3 && decision.Action.Type != "finish")
-            {
-                finalAnswer = ResolveStuckMessage(decision);
-                session.History.Add($"Ассистент: {finalAnswer}");
-                return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, true);
-            }
-
-            var actionSummary = await ExecuteActionAsync(decision.Action, snapshot, cancellationToken);
-            session.History.Add($"Шаг {step}: {decision.Thought}");
-            session.History.Add($"Действие {step}: {actionSummary}");
-
-            if (!string.IsNullOrWhiteSpace(actionSummary))
-            {
-                AppendThought(visibleThoughts, step, $"Действие: {actionSummary}");
-                progress?.Report(new AgentLoopProgress($"Шаг {step}: действие", visibleThoughts.ToString(), finalAnswer));
-            }
-
-            if (simpleOpenRequest &&
-                decision.Action.Type == "open_app" &&
-                !string.IsNullOrWhiteSpace(decision.Action.Target) &&
-                await OpenedAppLooksReadyAsync(decision.Action.Target, cancellationToken))
-            {
-                finalAnswer = $"Открыл {decision.Action.Target}.";
-                session.History.Add($"Ассистент: {finalAnswer}");
-                return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
-            }
-
-            if (decision.Action.Type == "finish")
-            {
-                finalAnswer = string.IsNullOrWhiteSpace(decision.FinalResponse)
-                    ? "Готово."
-                    : decision.FinalResponse;
-                session.History.Add($"Ассистент: {finalAnswer}");
+                progress?.Report(new AgentLoopProgress($"Шаг {step}: пауза из-за rate limit", visibleThoughts.ToString(), finalAnswer));
                 return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
             }
 
@@ -354,6 +376,8 @@ Desktop context:
 Все твои действия должны быть визуальными и пошаговыми: сначала оцени состояние, потом сделай один шаг, потом снова оцени.
 Если пользователь просит что-то написать, стереть, выделить, вставить, нарисовать, открыть, перетащить, прокрутить или заполнить, делай это через действия ввода и навигации.
 Если тебе не хватает обязательных данных от пользователя, не зацикливайся. Используй await_user и остановись до следующего сообщения пользователя.
+Если нужны логин, пароль, код, captcha, подтверждение, выбор пользователя или другие данные, которые нельзя додумать, используй await_user сразу и не повторяй одинаковые шаги.
+Если внешний сервис начал ограничивать запросы или не отвечает, не спамь повтором. Остановись с понятным статусом.
 Отвечай строго JSON-объектом без markdown, комментариев и лишнего текста.
 
 Формат:
@@ -479,6 +503,27 @@ Desktop context:
                normalized.StartsWith("launch ", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool ShouldRunSeparateAnalysis(ShellConfig config, ModelRoute? analysisRoute, int step)
+    {
+        if (!config.Models.UseSeparateAnalysis || analysisRoute is null)
+        {
+            return false;
+        }
+
+        if (RoutesEqual(analysisRoute, config.Models.Primary))
+        {
+            return false;
+        }
+
+        return step == 1 || step % 3 == 0;
+    }
+
+    private static bool RoutesEqual(ModelRoute left, ModelRoute right)
+    {
+        return string.Equals(left.Provider, right.Provider, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(left.Model, right.Model, StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<bool> OpenedAppLooksReadyAsync(string target, CancellationToken cancellationToken)
     {
         for (var attempt = 0; attempt < 5; attempt++)
@@ -524,8 +569,12 @@ Desktop context:
             "powershell" => ["powershell", "pwsh"],
             "cmd" => ["cmd"],
             "mspaint" => ["mspaint"],
+            "browser" => ["msedge", "chrome", "firefox", "brave"],
             "msedge" => ["msedge"],
             "chrome" => ["chrome"],
+            "firefox" => ["firefox"],
+            "brave" => ["brave"],
+            "explorer" => ["explorer"],
             _ => [normalized]
         };
     }

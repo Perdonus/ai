@@ -1,0 +1,17 @@
+{
+  "id": "open-browser",
+  "name": "Open Browser",
+  "description": "Open a URL in the default browser.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this when you need to open a site quickly in the user's default browser without visual key presses.",
+  "parameter_hints": {
+    "url": "https URL"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "start \"\" \"{{url}}\""
+  ],
+  "version": "0.1.0"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "download-file",
+  "name": "Download File",
+  "description": "Download a file from the internet to a target path.",
+  "kind": "command",
+  "entry": "curl.exe",
+  "system_prompt": "Use this when you need to fetch a file directly to disk.",
+  "parameter_hints": {
+    "url": "download URL",
+    "output_path": "absolute output file path"
+  },
+  "args_template": [
+    "-L",
+    "--fail",
+    "--output",
+    "{{output_path}}",
+    "{{url}}"
+  ],
+  "version": "0.1.0"
+}

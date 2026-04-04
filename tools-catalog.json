@@ -4,8 +4,44 @@
     {
       "id": "open-terminal",
       "name": "Open Terminal",
-      "description": "Open PowerShell in a target folder.",
+      "description": "Open Command Prompt in a target folder.",
       "folder": "tools/open-terminal"
+    },
+    {
+      "id": "run-cmd",
+      "name": "Run CMD",
+      "description": "Execute a cmd.exe command and capture its output.",
+      "folder": "tools/run-cmd"
+    },
+    {
+      "id": "open-browser",
+      "name": "Open Browser",
+      "description": "Open a URL in the default browser.",
+      "folder": "tools/open-browser"
+    },
+    {
+      "id": "download-file",
+      "name": "Download File",
+      "description": "Download a file from the internet to a target path.",
+      "folder": "tools/download-file"
+    },
+    {
+      "id": "git-clone",
+      "name": "Git Clone",
+      "description": "Clone a git repository into a target folder.",
+      "folder": "tools/git-clone"
+    },
+    {
+      "id": "list-processes",
+      "name": "List Processes",
+      "description": "Return the current Windows process list.",
+      "folder": "tools/list-processes"
+    },
+    {
+      "id": "search-files",
+      "name": "Search Files",
+      "description": "Search for files by name under a root folder.",
+      "folder": "tools/search-files"
     }
   ]
 }

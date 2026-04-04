@@ -2,11 +2,10 @@
   "branch": "widgets",
   "items": [
     {
-      "id": "sample-status",
-      "name": "Sample Status",
-      "description": "Minimal runtime widget example.",
-      "folder": "widgets/sample-status"
+      "id": "weather-orbit",
+      "name": "Weather Orbit",
+      "description": "Native weather widget with live metrics and an interactive sky scene.",
+      "folder": "widgets/weather-orbit"
     }
   ]
 }
-

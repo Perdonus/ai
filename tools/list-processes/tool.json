@@ -1,0 +1,14 @@
+{
+  "id": "list-processes",
+  "name": "List Processes",
+  "description": "Return the current Windows process list.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this when you need a quick snapshot of running processes or to confirm that an app is alive.",
+  "args_template": [
+    "/d",
+    "/c",
+    "tasklist"
+  ],
+  "version": "0.1.0"
+}

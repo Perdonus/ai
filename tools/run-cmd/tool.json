@@ -1,0 +1,17 @@
+{
+  "id": "run-cmd",
+  "name": "Run CMD",
+  "description": "Execute a cmd.exe command and capture its output.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this for fast non-visual Windows shell output when you need directories, file checks, git, downloads, or process info.",
+  "parameter_hints": {
+    "command": "cmd command text"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "{{command}}"
+  ],
+  "version": "0.1.0"
+}

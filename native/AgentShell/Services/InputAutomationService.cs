@@ -36,11 +36,14 @@ public sealed class InputAutomationService
         foreach (var key in resolved)
         {
             SendVirtualKey(key, keyUp: false);
+            Thread.Sleep(24);
         }
 
+        Thread.Sleep(32);
         for (var index = resolved.Length - 1; index >= 0; index--)
         {
             SendVirtualKey(resolved[index], keyUp: true);
+            Thread.Sleep(20);
         }
     }
 
@@ -109,7 +112,17 @@ public sealed class InputAutomationService
 
     public void Scroll(int delta)
     {
-        SendMouseInput(MouseeventfWheel, unchecked((uint)delta));
+        var remaining = delta;
+        while (remaining != 0)
+        {
+            var chunk = Math.Clamp(remaining, -120, 120);
+            SendMouseInput(MouseeventfWheel, unchecked((uint)chunk));
+            remaining -= chunk;
+            if (remaining != 0)
+            {
+                Thread.Sleep(18);
+            }
+        }
     }
 
     public async Task DragAsync(
@@ -239,15 +252,21 @@ public sealed class InputAutomationService
             "RIGHT" => 0x27,
             "HOME" => 0x24,
             "END" => 0x23,
-            "PAGEUP" => 0x21,
-            "PAGEDOWN" => 0x22,
-            "CTRL" or "CONTROL" => 0x11,
+            "PAGEUP" or "PGUP" => 0x21,
+            "PAGEDOWN" or "PGDOWN" or "PGDN" => 0x22,
+            "CTRL" or "CONTROL" or "LCTRL" or "RCTRL" => 0x11,
             "SHIFT" => 0x10,
-            "ALT" => 0x12,
-            "WIN" or "WINDOWS" => 0x5B,
+            "ALT" or "LALT" or "RALT" or "ALTGR" => 0x12,
+            "WIN" or "WINDOWS" or "META" or "SUPER" or "CMD" or "COMMAND" or "LWIN" or "RWIN" => 0x5B,
             "BACKSPACE" => 0x08,
             "DELETE" => 0x2E,
             "INSERT" => 0x2D,
+            "CAPSLOCK" => 0x14,
+            "NUMLOCK" => 0x90,
+            "SCROLLLOCK" => 0x91,
+            "PRINTSCREEN" or "PRTSC" or "PRNTSCR" => 0x2C,
+            "PAUSE" => 0x13,
+            "APPS" or "MENU" or "CONTEXT" => 0x5D,
             "F1" => 0x70,
             "F2" => 0x71,
             "F3" => 0x72,
