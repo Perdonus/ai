@@ -1,0 +1,131 @@
+{
+  "branch": "tools",
+  "items": [
+    {
+      "id": "open-terminal",
+      "name": "Open Terminal",
+      "description": "Open Command Prompt in a target folder.",
+      "folder": "tools/open-terminal"
+    },
+    {
+      "id": "run-cmd",
+      "name": "Run CMD",
+      "description": "Execute a cmd.exe command and capture its output.",
+      "folder": "tools/run-cmd"
+    },
+    {
+      "id": "open-browser",
+      "name": "Open Browser",
+      "description": "Open a URL in the default browser.",
+      "folder": "tools/open-browser"
+    },
+    {
+      "id": "download-file",
+      "name": "Download File",
+      "description": "Download a file from the internet to a target path.",
+      "folder": "tools/download-file"
+    },
+    {
+      "id": "git-clone",
+      "name": "Git Clone",
+      "description": "Clone a git repository into a target folder.",
+      "folder": "tools/git-clone"
+    },
+    {
+      "id": "list-processes",
+      "name": "List Processes",
+      "description": "Return the current Windows process list.",
+      "folder": "tools/list-processes"
+    },
+    {
+      "id": "search-files",
+      "name": "Search Files",
+      "description": "Search for files by name under a root folder.",
+      "folder": "tools/search-files"
+    },
+    {
+      "id": "list-directory",
+      "name": "List Directory",
+      "description": "List files and folders inside a target directory.",
+      "folder": "tools/list-directory"
+    },
+    {
+      "id": "read-text-file",
+      "name": "Read Text File",
+      "description": "Read a text file with cmd type.",
+      "folder": "tools/read-text-file"
+    },
+    {
+      "id": "open-folder",
+      "name": "Open Folder",
+      "description": "Open a folder in Windows Explorer.",
+      "folder": "tools/open-folder"
+    },
+    {
+      "id": "kill-process",
+      "name": "Kill Process",
+      "description": "Force-stop a running process by image name.",
+      "folder": "tools/kill-process"
+    },
+    {
+      "id": "git-pull",
+      "name": "Git Pull",
+      "description": "Run git pull --ff-only inside a repository.",
+      "folder": "tools/git-pull"
+    },
+    {
+      "id": "browser-search",
+      "name": "Browser Search",
+      "description": "Open a web search in the default browser.",
+      "folder": "tools/browser-search"
+    },
+    {
+      "id": "make-directory",
+      "name": "Make Directory",
+      "description": "Create a directory if it does not exist.",
+      "folder": "tools/make-directory"
+    },
+    {
+      "id": "extract-zip",
+      "name": "Extract Zip",
+      "description": "Extract a zip archive into a destination folder.",
+      "folder": "tools/extract-zip"
+    },
+    {
+      "id": "zip-folder",
+      "name": "Zip Folder",
+      "description": "Create a zip archive from a folder.",
+      "folder": "tools/zip-folder"
+    },
+    {
+      "id": "git-add-commit",
+      "name": "Git Add And Commit",
+      "description": "Stage all changes and create a git commit.",
+      "folder": "tools/git-add-commit"
+    },
+    {
+      "id": "git-push",
+      "name": "Git Push",
+      "description": "Push the current branch to its remote.",
+      "folder": "tools/git-push"
+    },
+    {
+      "id": "npm-run",
+      "name": "NPM Run",
+      "description": "Run an npm script inside a project.",
+      "folder": "tools/npm-run"
+    },
+    {
+      "id": "dotnet-build",
+      "name": "Dotnet Build",
+      "description": "Build a .NET project or solution.",
+      "folder": "tools/dotnet-build"
+    },
+    {
+      "id": "cargo-build",
+      "name": "Cargo Build",
+      "description": "Build a Rust project with cargo.",
+      "folder": "tools/cargo-build"
+    }
+  ]
+}
