@@ -18,6 +18,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     private const int VisibleMargin = 18;
     private const int SwHide = 0;
     private const int SwShow = 5;
+    private const uint TransparentKeyColor = 0x00030201;
 
     private readonly Window _window = window;
     private readonly FrameworkElement _animatedRoot = animatedRoot;
@@ -40,6 +41,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         }
 
         EnsureTaskbarWindowStyle();
+        EnableTransparentHost();
         SuppressWindowFrame();
         SetExpanded(false);
         StartupLogService.Info("Launcher chrome initialized.");
@@ -155,11 +157,23 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         _ = SetWindowLongPtr(hwnd, GwlStyle, new IntPtr(style));
 
         var exStyle = GetWindowLongPtr(hwnd, GwlExstyle).ToInt64();
-        exStyle |= WsExToolwindow;
+        exStyle |= WsExToolwindow | WsExLayered;
         exStyle &= ~WsExAppwindow;
         _ = SetWindowLongPtr(hwnd, GwlExstyle, new IntPtr(exStyle));
         _ = SetWindowPos(hwnd, nint.Zero, 0, 0, 0, 0, SwpNomove | SwpNosize | SwpFramechanged);
         StartupLogService.Info($"Launcher extended window style set to 0x{exStyle:X}.");
+    }
+
+    private void EnableTransparentHost()
+    {
+        var hwnd = WindowNative.GetWindowHandle(_window);
+        if (!SetLayeredWindowAttributes(hwnd, TransparentKeyColor, 0, LwaColorkey))
+        {
+            StartupLogService.Warn($"Failed to enable launcher transparency. win32={Marshal.GetLastWin32Error()}");
+            return;
+        }
+
+        StartupLogService.Info("Launcher layered transparency enabled.");
     }
 
     private void SuppressWindowFrame()
@@ -195,7 +209,9 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     private const long WsMinimizebox = 0x00020000L;
     private const long WsMaximizebox = 0x00010000L;
     private const long WsExToolwindow = 0x00000080L;
+    private const long WsExLayered = 0x00080000L;
     private const long WsExAppwindow = 0x00040000L;
+    private const uint LwaColorkey = 0x00000001;
     private const uint DwmwaWindowCornerPreference = 33;
     private const uint DwmwaBorderColor = 34;
     private const uint DwmColorNone = 0xFFFFFFFE;
@@ -226,6 +242,9 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetCursorPos(out Point point);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetLayeredWindowAttributes(nint hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
     [DllImport("dwmapi.dll", SetLastError = true)]
     private static extern int DwmSetWindowAttribute(nint hwnd, uint dwAttribute, ref uint pvAttribute, int cbAttribute);

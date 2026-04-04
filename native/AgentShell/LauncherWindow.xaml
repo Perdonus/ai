@@ -6,15 +6,16 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:automation="using:Microsoft.UI.Xaml.Automation"
     mc:Ignorable="d">
-    <Grid Background="Transparent">
+    <Grid Background="#010203">
         <Border
             x:Name="ShellPanel"
-            Width="480"
+            Margin="10,0"
             Padding="10"
             Background="#0A1017"
             BorderBrush="Transparent"
             BorderThickness="0"
-            CornerRadius="30">
+            CornerRadius="30"
+            HorizontalAlignment="Stretch">
             <Grid RowDefinitions="Auto,Auto">
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBox
