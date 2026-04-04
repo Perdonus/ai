@@ -8,52 +8,114 @@
     <Grid Background="Transparent">
         <Border
             x:Name="ShellPanel"
-            Width="468"
-            Height="108"
-            Padding="20,18"
-            Background="{StaticResource ShellPanelBrush}"
-            BorderBrush="{StaticResource ShellPanelEdgeBrush}"
-            BorderThickness="1"
-            CornerRadius="28">
-            <Grid RowDefinitions="Auto,Auto">
+            Width="520"
+            Padding="20"
+            Background="#0B1118"
+            BorderThickness="0"
+            CornerRadius="30">
+            <Grid RowDefinitions="Auto,Auto,Auto">
                 <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock
-                        Text="Agent"
-                        Foreground="{StaticResource ShellAccentBrush}"
-                        FontSize="13"
-                        FontWeight="SemiBold"
-                        Opacity="0.92"
-                        VerticalAlignment="Center" />
+                    <StackPanel>
+                        <TextBlock
+                            Text="Agent"
+                            Foreground="{StaticResource ShellAccentBrush}"
+                            FontSize="13"
+                            FontWeight="SemiBold"
+                            Opacity="0.96" />
+                        <TextBlock
+                            x:Name="StatusText"
+                            Margin="0,4,0,0"
+                            Text="Ready"
+                            Foreground="#8FA6BE"
+                            FontSize="12" />
+                    </StackPanel>
                     <Button
                         x:Name="SettingsButton"
                         Grid.Column="1"
-                        Width="28"
-                        Height="28"
+                        Width="30"
+                        Height="30"
                         Padding="0"
                         HorizontalAlignment="Right"
-                        VerticalAlignment="Center"
+                        VerticalAlignment="Top"
                         FontSize="14"
                         Content="⚙"
-                        Background="#18212E"
+                        Background="#17202C"
                         Foreground="{StaticResource ShellTextBrush}"
-                        BorderBrush="#263243"
-                        BorderThickness="1"
-                        CornerRadius="14"
+                        BorderThickness="0"
+                        CornerRadius="15"
                         Click="SettingsButton_Click" />
                 </Grid>
-                <TextBox
-                    x:Name="PromptBox"
+
+                <Border
                     Grid.Row="1"
-                    Margin="0,12,0,0"
-                    Height="44"
-                    Padding="14,0"
-                    PlaceholderText="Напиши действие"
-                    FontSize="18"
-                    Background="#171F2B"
+                    Margin="0,16,0,0"
+                    Padding="14"
+                    Background="#111925"
                     BorderThickness="0"
-                    Foreground="{StaticResource ShellTextBrush}"
-                    CornerRadius="18"
-                    KeyDown="PromptBox_KeyDown" />
+                    CornerRadius="22">
+                    <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="14">
+                            <StackPanel x:Name="ThinkingPanel" Visibility="Collapsed" Spacing="6">
+                                <TextBlock
+                                    Text="Размышления"
+                                    Foreground="{StaticResource ShellAccentBrush}"
+                                    FontSize="12"
+                                    FontWeight="SemiBold" />
+                                <TextBlock
+                                    x:Name="ThinkingText"
+                                    TextWrapping="WrapWholeWords"
+                                    Foreground="#D1D9E5"
+                                    FontSize="13" />
+                            </StackPanel>
+                            <StackPanel x:Name="AnswerPanel" Visibility="Collapsed" Spacing="6">
+                                <TextBlock
+                                    Text="Ответ"
+                                    Foreground="#9FD0FF"
+                                    FontSize="12"
+                                    FontWeight="SemiBold" />
+                                <TextBlock
+                                    x:Name="AnswerText"
+                                    TextWrapping="WrapWholeWords"
+                                    Foreground="{StaticResource ShellTextBrush}"
+                                    FontSize="14" />
+                            </StackPanel>
+                            <TextBlock
+                                x:Name="ErrorText"
+                                Visibility="Collapsed"
+                                TextWrapping="WrapWholeWords"
+                                Foreground="#FF9F9F"
+                                FontSize="13" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+                <Grid Grid.Row="2" Margin="0,14,0,0" ColumnDefinitions="*,Auto">
+                    <TextBox
+                        x:Name="PromptBox"
+                        Margin="0,0,10,0"
+                        Height="44"
+                        Padding="14,0"
+                        PlaceholderText="Напиши действие"
+                        FontSize="18"
+                        Background="#171F2B"
+                        BorderThickness="0"
+                        Foreground="{StaticResource ShellTextBrush}"
+                        CornerRadius="20"
+                        KeyDown="PromptBox_KeyDown" />
+                    <Button
+                        x:Name="SendButton"
+                        Grid.Column="1"
+                        Width="44"
+                        Height="44"
+                        Padding="0"
+                        FontSize="18"
+                        Content="→"
+                        Background="{StaticResource ShellAccentBrush}"
+                        Foreground="#081018"
+                        BorderThickness="0"
+                        CornerRadius="22"
+                        Click="SendButton_Click" />
+                </Grid>
             </Grid>
         </Border>
     </Grid>

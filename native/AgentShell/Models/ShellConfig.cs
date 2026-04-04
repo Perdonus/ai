@@ -23,11 +23,17 @@ public sealed class ModelSettings
     [JsonPropertyName("primary")]
     public ModelRoute Primary { get; set; } = new("sosiskibot", string.Empty);
 
+    [JsonPropertyName("primary_thinking")]
+    public bool PrimaryThinking { get; set; }
+
     [JsonPropertyName("use_separate_analysis")]
     public bool UseSeparateAnalysis { get; set; }
 
     [JsonPropertyName("analysis")]
     public ModelRoute Analysis { get; set; } = new("sosiskibot", string.Empty);
+
+    [JsonPropertyName("analysis_thinking")]
+    public bool AnalysisThinking { get; set; }
 
     [JsonPropertyName("use_separate_vision")]
     public bool UseSeparateVision { get; set; }

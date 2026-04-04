@@ -9,9 +9,12 @@ namespace AgentShell;
 
 public sealed partial class LauncherWindow : Window
 {
+    private readonly AgentChatService _chatService = new();
     private readonly GlobalHotkeyService _hotkey;
     private readonly WindowVisualService _visuals;
     private readonly DispatcherQueue _dispatcherQueue;
+    private CancellationTokenSource? _promptCts;
+    private bool _isBusy;
     private bool _isVisible;
     private bool _ignoreNextDeactivation;
 
@@ -35,6 +38,7 @@ public sealed partial class LauncherWindow : Window
             StartupLogService.Info("Global hotkey registered for Right Ctrl.");
 
             Activated += LauncherWindow_Activated;
+            ResetOutput();
         }
         catch (Exception ex)
         {
@@ -61,6 +65,7 @@ public sealed partial class LauncherWindow : Window
         _ignoreNextDeactivation = true;
         ShowWindow(WindowNative.GetWindowHandle(this), 5);
         await _visuals.AnimateAsync(show: true);
+        await Task.Delay(60);
         await EnqueueOnUiAsync(() =>
         {
             _isVisible = true;
@@ -80,15 +85,8 @@ public sealed partial class LauncherWindow : Window
         _ = HideInternalAsync(immediate);
     }
 
-    public void BringToFront()
-    {
-        ShowWindow(WindowNative.GetWindowHandle(this), 5);
-        SetForegroundWindow(WindowNative.GetWindowHandle(this));
-    }
-
     private async Task HideInternalAsync(bool immediate)
     {
-        PromptBox.Text = string.Empty;
         _isVisible = false;
 
         if (immediate)
@@ -111,11 +109,14 @@ public sealed partial class LauncherWindow : Window
         if (args.WindowActivationState == WindowActivationState.Deactivated)
         {
             await Task.Delay(40);
-            HideAnimated();
+            if (!_isBusy)
+            {
+                HideAnimated();
+            }
         }
     }
 
-    private void PromptBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    private async void PromptBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == Windows.System.VirtualKey.RightControl)
         {
@@ -126,34 +127,118 @@ public sealed partial class LauncherWindow : Window
 
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
-            HandlePrompt(PromptBox.Text.Trim());
+            await SubmitPromptAsync();
             e.Handled = true;
+            return;
         }
 
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
-            HideAnimated();
+            if (_isBusy)
+            {
+                _promptCts?.Cancel();
+                SetStatus("Cancelled");
+            }
+            else
+            {
+                HideAnimated();
+            }
+
             e.Handled = true;
         }
     }
 
-    private void HandlePrompt(string prompt)
+    private async void SendButton_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(prompt))
+        await SubmitPromptAsync();
+    }
+
+    private async Task SubmitPromptAsync()
+    {
+        var prompt = PromptBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(prompt) || _isBusy)
         {
+            return;
+        }
+
+        if (prompt.Contains("настрой", StringComparison.OrdinalIgnoreCase) ||
+            prompt.Contains("settings", StringComparison.OrdinalIgnoreCase))
+        {
+            App.ShowSettings();
             return;
         }
 
         StartupLogService.Info($"Prompt submitted: {prompt}");
-        if (prompt.Contains("\u043d\u0430\u0441\u0442\u0440\u043e\u0439", StringComparison.OrdinalIgnoreCase) ||
-            prompt.Contains("settings", StringComparison.OrdinalIgnoreCase))
-        {
-            App.ShowSettings();
-            HideAnimated();
-            return;
-        }
+        _promptCts?.Cancel();
+        _promptCts = new CancellationTokenSource();
+        _isBusy = true;
 
-        HideAnimated();
+        await EnqueueOnUiAsync(() =>
+        {
+            SendButton.IsEnabled = false;
+            PromptBox.IsEnabled = false;
+            SetStatus("Thinking...");
+            ThinkingPanel.Visibility = Visibility.Collapsed;
+            AnswerPanel.Visibility = Visibility.Collapsed;
+            ErrorText.Visibility = Visibility.Collapsed;
+            ErrorText.Text = string.Empty;
+            ThinkingText.Text = string.Empty;
+            AnswerText.Text = string.Empty;
+        });
+
+        try
+        {
+            var result = await _chatService.RunAsync(App.ConfigService.Current, prompt, _promptCts.Token);
+            await EnqueueOnUiAsync(() =>
+            {
+                if (!string.IsNullOrWhiteSpace(result.Error))
+                {
+                    ErrorText.Text = result.Error;
+                    ErrorText.Visibility = Visibility.Visible;
+                    SetStatus("Request failed");
+                }
+                else
+                {
+                    if (!string.IsNullOrWhiteSpace(result.Thinking))
+                    {
+                        ThinkingText.Text = result.Thinking;
+                        ThinkingPanel.Visibility = Visibility.Visible;
+                    }
+
+                    AnswerText.Text = result.Answer;
+                    AnswerPanel.Visibility = Visibility.Visible;
+                    SetStatus("Ready");
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            await EnqueueOnUiAsync(() =>
+            {
+                SetStatus("Cancelled");
+            });
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Error($"Prompt execution failed: {ex}");
+            await EnqueueOnUiAsync(() =>
+            {
+                ErrorText.Text = ex.Message;
+                ErrorText.Visibility = Visibility.Visible;
+                SetStatus("Request failed");
+            });
+        }
+        finally
+        {
+            _isBusy = false;
+            await EnqueueOnUiAsync(() =>
+            {
+                SendButton.IsEnabled = true;
+                PromptBox.IsEnabled = true;
+                PromptBox.Focus(FocusState.Programmatic);
+                PromptBox.SelectAll();
+            });
+        }
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
@@ -175,6 +260,22 @@ public sealed partial class LauncherWindow : Window
                 StartupLogService.Error($"Hotkey toggle failed: {ex}");
             }
         });
+    }
+
+    private void SetStatus(string text)
+    {
+        StatusText.Text = text;
+    }
+
+    private void ResetOutput()
+    {
+        SetStatus("Ready");
+        ThinkingText.Text = string.Empty;
+        AnswerText.Text = string.Empty;
+        ErrorText.Text = string.Empty;
+        ThinkingPanel.Visibility = Visibility.Collapsed;
+        AnswerPanel.Visibility = Visibility.Collapsed;
+        ErrorText.Visibility = Visibility.Collapsed;
     }
 
     private Task EnqueueOnUiAsync(Action action)
@@ -213,7 +314,4 @@ public sealed partial class LauncherWindow : Window
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hWnd, int nCmdShow);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(nint hWnd);
 }

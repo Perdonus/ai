@@ -11,8 +11,8 @@ namespace AgentShell.Services;
 
 public sealed class WindowVisualService(Window window, FrameworkElement animatedRoot)
 {
-    private const int LauncherWidth = 468;
-    private const int LauncherHeight = 108;
+    private const int LauncherWidth = 520;
+    private const int LauncherHeight = 340;
     private const int VisibleMargin = 40;
     private const int HiddenOffset = 36;
 
@@ -24,7 +24,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     public void InitializeLauncherChrome()
     {
         _appWindow.Title = "AI Agent";
-        _appWindow.IsShownInSwitchers = true;
+        _appWindow.IsShownInSwitchers = false;
 
         if (_appWindow.Presenter is OverlappedPresenter presenter)
         {
@@ -118,8 +118,8 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     {
         var hwnd = WindowNative.GetWindowHandle(_window);
         var exStyle = GetWindowLongPtr(hwnd, GwlExstyle).ToInt64();
-        exStyle &= ~WsExToolwindow;
-        exStyle |= WsExAppwindow;
+        exStyle |= WsExToolwindow;
+        exStyle &= ~WsExAppwindow;
         _ = SetWindowLongPtr(hwnd, GwlExstyle, new IntPtr(exStyle));
         StartupLogService.Info($"Launcher extended window style set to 0x{exStyle:X}.");
     }

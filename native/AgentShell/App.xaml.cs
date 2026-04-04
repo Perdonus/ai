@@ -14,6 +14,8 @@ public partial class App : Application
 
     public static RuntimeCatalogService RuntimeCatalog { get; } = new();
 
+    private TrayIconService? _trayIcon;
+
     public App()
     {
         StartupLogService.Initialize();
@@ -32,6 +34,7 @@ public partial class App : Application
 
             Launcher = new LauncherWindow();
             StartupLogService.Info("Launcher window created.");
+            _trayIcon = new TrayIconService(OpenLauncher, ShowSettings, ExitApp);
             Launcher.Activate();
             Launcher.HideAnimated(immediate: true);
             StartupLogService.Info("Launcher hidden immediately after activation.");
@@ -45,18 +48,48 @@ public partial class App : Application
 
     public static void ShowSettings()
     {
+        if (Launcher is null)
+        {
+            return;
+        }
+
+        Launcher.DispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                Settings ??= new SettingsWindow();
+                StartupLogService.Info("Settings window opened.");
+                Settings.BringToFront();
+            }
+            catch (COMException ex)
+            {
+                StartupLogService.Warn($"Settings window recreation requested after COM failure: {ex.Message}");
+                Settings = new SettingsWindow();
+                StartupLogService.Info("Settings window reopened with a fresh instance.");
+                Settings.BringToFront();
+            }
+        });
+    }
+
+    public static void OpenLauncher()
+    {
+        if (Launcher is null)
+        {
+            return;
+        }
+
+        Launcher.DispatcherQueue.TryEnqueue(async () => await Launcher.ShowAnimatedAsync());
+    }
+
+    private void ExitApp()
+    {
         try
         {
-            Settings ??= new SettingsWindow();
-            StartupLogService.Info("Settings window opened.");
-            Settings.BringToFront();
+            _trayIcon?.Dispose();
         }
-        catch (COMException ex)
+        finally
         {
-            StartupLogService.Warn($"Settings window recreation requested after COM failure: {ex.Message}");
-            Settings = new SettingsWindow();
-            StartupLogService.Info("Settings window reopened with a fresh instance.");
-            Settings.BringToFront();
+            Exit();
         }
     }
 

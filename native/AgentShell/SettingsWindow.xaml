@@ -6,35 +6,44 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:models="using:AgentShell.Models"
     mc:Ignorable="d">
-    <Grid Background="#0B1018">
+    <Grid Background="#09111A">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="240" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <Border Background="#121B28" Padding="18">
+        <Border Background="#111925" Padding="20">
             <StackPanel Spacing="10">
-                <TextBlock Text="Настройки агента" FontSize="20" FontWeight="SemiBold" Foreground="White" />
+                <TextBlock Text="Настройки агента" FontSize="22" FontWeight="SemiBold" Foreground="White" />
                 <Button Content="Провайдеры" Click="ProvidersTabButton_Click" />
                 <Button Content="Модели" Click="ModelsTabButton_Click" />
                 <Button Content="Тулзы" Click="ToolsTabButton_Click" />
                 <Button Content="Виджеты" Click="WidgetsTabButton_Click" />
                 <Button Margin="0,18,0,0" Content="Сохранить" Click="SaveButton_Click" />
+                <Button Content="Бэкап" Click="BackupButton_Click" />
+                <Button Content="Экспорт" Click="ExportButton_Click" />
+                <Button Content="Восстановить последний" Click="RestoreButton_Click" />
+                <TextBlock x:Name="OperationStatusText" Margin="0,10,0,0" Foreground="#8FA6BE" TextWrapping="WrapWholeWords" />
             </StackPanel>
         </Border>
 
-        <Grid Grid.Column="1" Padding="24">
+        <Grid Grid.Column="1" Padding="26">
             <ScrollViewer x:Name="ProvidersView" Visibility="Visible">
                 <StackPanel Spacing="14">
-                    <TextBlock Text="Провайдеры" FontSize="26" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock Text="Только API-ключи. Базовые адреса провайдеров жёстко заданы в приложении." Foreground="#A8B3C4" />
+                    <TextBlock Text="Провайдеры" FontSize="28" FontWeight="SemiBold" Foreground="White" />
+                    <TextBlock Text="Только API-ключи. Базовые URL провайдеров уже зашиты в приложение." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
                     <ItemsControl x:Name="ProvidersList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="models:ProviderDescriptor">
                                 <Border Background="#131D2A" CornerRadius="22" Padding="16" Margin="0,0,0,10">
                                     <StackPanel Spacing="8">
                                         <TextBlock Text="{x:Bind Name}" FontSize="18" Foreground="White" />
-                                        <PasswordBox Tag="{x:Bind Id}" PasswordChanged="ProviderApiKeyBox_PasswordChanged" />
+                                        <TextBox
+                                            Tag="{x:Bind Id}"
+                                            PlaceholderText="API key"
+                                            Loaded="ProviderApiKeyBox_Loaded"
+                                            TextChanged="ProviderApiKeyBox_TextChanged"
+                                            LostFocus="ProviderApiKeyBox_LostFocus" />
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>
@@ -45,26 +54,27 @@
 
             <ScrollViewer x:Name="ModelsView" Visibility="Collapsed">
                 <StackPanel Spacing="16">
-                    <TextBlock Text="Модели" FontSize="26" FontWeight="SemiBold" Foreground="White" />
+                    <TextBlock Text="Модели" FontSize="28" FontWeight="SemiBold" Foreground="White" />
                     <Border Background="#131D2A" CornerRadius="22" Padding="18">
                         <StackPanel Spacing="12">
-                            <TextBlock Text="Модель" FontSize="18" Foreground="White" />
-                            <Expander Header="Основная модель" IsExpanded="True">
-                                <StackPanel Spacing="10" Padding="0,12,0,0">
-                                    <ComboBox x:Name="PrimaryProviderCombo" SelectionChanged="PrimaryProviderCombo_SelectionChanged" />
-                                    <ComboBox x:Name="PrimaryModelCombo" />
-                                </StackPanel>
-                            </Expander>
+                            <TextBlock Text="Основная модель" FontSize="18" Foreground="White" />
+                            <ComboBox x:Name="PrimaryProviderCombo" SelectionChanged="PrimaryProviderCombo_SelectionChanged" />
+                            <ComboBox x:Name="PrimaryModelCombo" />
+                            <CheckBox x:Name="PrimaryThinkingToggle" Content="Показывать размышления основной модели" />
+
                             <CheckBox x:Name="SeparateAnalysisToggle" Content="Отдельная модель анализа" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
                             <StackPanel x:Name="AnalysisPanel" Spacing="10">
                                 <ComboBox x:Name="AnalysisProviderCombo" SelectionChanged="AnalysisProviderCombo_SelectionChanged" />
                                 <ComboBox x:Name="AnalysisModelCombo" />
+                                <CheckBox x:Name="AnalysisThinkingToggle" Content="Показывать размышления модели анализа" />
                             </StackPanel>
+
                             <CheckBox x:Name="SeparateVisionToggle" Content="Отдельная vision-модель" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
                             <StackPanel x:Name="VisionPanel" Spacing="10">
                                 <ComboBox x:Name="VisionProviderCombo" SelectionChanged="VisionProviderCombo_SelectionChanged" />
                                 <ComboBox x:Name="VisionModelCombo" />
                             </StackPanel>
+
                             <CheckBox x:Name="SeparateOcrToggle" Content="Отдельная OCR-модель" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
                             <StackPanel x:Name="OcrPanel" Spacing="10">
                                 <ComboBox x:Name="OcrProviderCombo" SelectionChanged="OcrProviderCombo_SelectionChanged" />
@@ -77,7 +87,7 @@
 
             <ScrollViewer x:Name="ToolsView" Visibility="Collapsed">
                 <StackPanel Spacing="16">
-                    <TextBlock Text="Тулзы" FontSize="26" FontWeight="SemiBold" Foreground="White" />
+                    <TextBlock Text="Тулзы" FontSize="28" FontWeight="SemiBold" Foreground="White" />
                     <ItemsControl x:Name="ToolsList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="models:RuntimeItem">
@@ -99,8 +109,8 @@
 
             <ScrollViewer x:Name="WidgetsView" Visibility="Collapsed">
                 <StackPanel Spacing="16">
-                    <TextBlock Text="Виджеты" FontSize="26" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock Text="У виджетов сохранён флаг ввода данных, чтобы агент мог писать в них данные дальше." Foreground="#A8B3C4" />
+                    <TextBlock Text="Виджеты" FontSize="28" FontWeight="SemiBold" Foreground="White" />
+                    <TextBlock Text="Виджеты могут принимать данные от агента, если это объявлено в их манифесте." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
                     <ItemsControl x:Name="WidgetsList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="models:RuntimeItem">

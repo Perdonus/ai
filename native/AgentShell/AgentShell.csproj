@@ -8,6 +8,7 @@
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <UseWinUI>true</UseWinUI>
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableMsixTooling>false</EnableMsixTooling>

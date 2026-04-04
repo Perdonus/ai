@@ -38,7 +38,9 @@ public sealed partial class SettingsWindow : Window
     {
         var appWindow = GetAppWindow();
         appWindow.Title = "AI Agent Settings";
+        appWindow.IsShownInSwitchers = false;
         appWindow.Resize(new Windows.Graphics.SizeInt32(980, 760));
+        ApplyToolWindowStyle();
     }
 
     private void HookCloseBehavior()
@@ -59,10 +61,13 @@ public sealed partial class SettingsWindow : Window
                 BindRouteSelector(VisionProviderCombo, _config.Current.Models.Vision);
                 BindRouteSelector(OcrProviderCombo, _config.Current.Models.Ocr);
 
+                PrimaryThinkingToggle.IsChecked = _config.Current.Models.PrimaryThinking;
+                AnalysisThinkingToggle.IsChecked = _config.Current.Models.AnalysisThinking;
                 SeparateAnalysisToggle.IsChecked = _config.Current.Models.UseSeparateAnalysis;
                 SeparateVisionToggle.IsChecked = _config.Current.Models.UseSeparateVision;
                 SeparateOcrToggle.IsChecked = _config.Current.Models.UseSeparateOcr;
                 ApplySeparateRouteVisibility();
+                OperationStatusText.Text = string.Empty;
             });
 
             await LoadModelChoicesAsync(PrimaryProviderCombo, PrimaryModelCombo, _config.Current.Models.Primary.Model);
@@ -82,6 +87,7 @@ public sealed partial class SettingsWindow : Window
         catch (Exception ex)
         {
             StartupLogService.Error($"Settings load failed: {ex}");
+            await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Ошибка загрузки настроек: {ex.Message}");
         }
     }
 
@@ -98,7 +104,7 @@ public sealed partial class SettingsWindow : Window
         await EnqueueOnUiAsync(() =>
         {
             provider = providerCombo.SelectedItem as ProviderDescriptor;
-            modelCombo.PlaceholderText = "Loading models...";
+            modelCombo.PlaceholderText = "Загрузка моделей...";
             modelCombo.ItemsSource = null;
             modelCombo.SelectedItem = null;
         });
@@ -110,25 +116,25 @@ public sealed partial class SettingsWindow : Window
 
         var apiKey = _config.Current.Providers.GetValueOrDefault(provider.Id)?.ApiKey ?? string.Empty;
         IReadOnlyList<string> models;
-        var placeholder = "Choose model";
+        var placeholder = "Выберите модель";
 
         try
         {
             models = await _modelDiscovery.LoadModelsAsync(provider, apiKey);
             if (string.IsNullOrWhiteSpace(apiKey))
             {
-                placeholder = "Enter provider API key first";
+                placeholder = "Введите API key";
             }
             else if (models.Count == 0)
             {
-                placeholder = "No models available";
+                placeholder = "Модели не найдены";
             }
         }
         catch (Exception ex)
         {
             StartupLogService.Error($"Model load failed for provider {provider.Id}: {ex}");
             models = [];
-            placeholder = "Failed to load models";
+            placeholder = "Ошибка загрузки моделей";
         }
 
         await EnqueueOnUiAsync(() =>
@@ -160,11 +166,49 @@ public sealed partial class SettingsWindow : Window
     {
         SyncModelSettings();
         await _config.SaveAsync();
+        OperationStatusText.Text = $"Сохранено: {_config.NativeConfigPath}";
     }
 
-    private void ProviderApiKeyBox_PasswordChanged(object sender, RoutedEventArgs e)
+    private async void BackupButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not PasswordBox passwordBox || passwordBox.Tag is not string providerId)
+        SyncModelSettings();
+        var path = await _config.CreateBackupSnapshotAsync();
+        OperationStatusText.Text = $"Бэкап создан: {path}";
+    }
+
+    private async void ExportButton_Click(object sender, RoutedEventArgs e)
+    {
+        SyncModelSettings();
+        var path = await _config.ExportAsync();
+        OperationStatusText.Text = $"Экспорт создан: {path}";
+    }
+
+    private async void RestoreButton_Click(object sender, RoutedEventArgs e)
+    {
+        var path = await _config.RestoreLatestBackupAsync();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            OperationStatusText.Text = "Бэкапы не найдены.";
+            return;
+        }
+
+        OperationStatusText.Text = $"Восстановлено: {path}";
+        await LoadSafeAsync();
+    }
+
+    private void ProviderApiKeyBox_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox textBox || textBox.Tag is not string providerId)
+        {
+            return;
+        }
+
+        textBox.Text = _config.Current.Providers.GetValueOrDefault(providerId)?.ApiKey ?? string.Empty;
+    }
+
+    private void ProviderApiKeyBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (sender is not TextBox textBox || textBox.Tag is not string providerId)
         {
             return;
         }
@@ -175,7 +219,40 @@ public sealed partial class SettingsWindow : Window
             _config.Current.Providers[providerId] = provider;
         }
 
-        provider.ApiKey = passwordBox.Password;
+        provider.ApiKey = textBox.Text.Trim();
+    }
+
+    private async void ProviderApiKeyBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox textBox || textBox.Tag is not string providerId)
+        {
+            return;
+        }
+
+        await RefreshProvidersUsingKeyAsync(providerId);
+    }
+
+    private async Task RefreshProvidersUsingKeyAsync(string providerId)
+    {
+        if ((PrimaryProviderCombo.SelectedItem as ProviderDescriptor)?.Id == providerId)
+        {
+            await LoadModelChoicesAsync(PrimaryProviderCombo, PrimaryModelCombo, string.Empty);
+        }
+
+        if ((AnalysisProviderCombo.SelectedItem as ProviderDescriptor)?.Id == providerId)
+        {
+            await LoadModelChoicesAsync(AnalysisProviderCombo, AnalysisModelCombo, string.Empty);
+        }
+
+        if ((VisionProviderCombo.SelectedItem as ProviderDescriptor)?.Id == providerId)
+        {
+            await LoadModelChoicesAsync(VisionProviderCombo, VisionModelCombo, string.Empty);
+        }
+
+        if ((OcrProviderCombo.SelectedItem as ProviderDescriptor)?.Id == providerId)
+        {
+            await LoadModelChoicesAsync(OcrProviderCombo, OcrModelCombo, string.Empty);
+        }
     }
 
     private async void PrimaryProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -237,8 +314,10 @@ public sealed partial class SettingsWindow : Window
     private void SyncModelSettings()
     {
         _config.Current.Models.Primary = CaptureRoute(PrimaryProviderCombo, PrimaryModelCombo);
+        _config.Current.Models.PrimaryThinking = PrimaryThinkingToggle.IsChecked == true;
         _config.Current.Models.UseSeparateAnalysis = SeparateAnalysisToggle.IsChecked == true;
         _config.Current.Models.Analysis = CaptureRoute(AnalysisProviderCombo, AnalysisModelCombo);
+        _config.Current.Models.AnalysisThinking = AnalysisThinkingToggle.IsChecked == true;
         _config.Current.Models.UseSeparateVision = SeparateVisionToggle.IsChecked == true;
         _config.Current.Models.Vision = CaptureRoute(VisionProviderCombo, VisionModelCombo);
         _config.Current.Models.UseSeparateOcr = SeparateOcrToggle.IsChecked == true;
@@ -286,8 +365,26 @@ public sealed partial class SettingsWindow : Window
         return AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowNative.GetWindowHandle(this)));
     }
 
+    private void ApplyToolWindowStyle()
+    {
+        var hwnd = WindowNative.GetWindowHandle(this);
+        var exStyle = GetWindowLongPtr(hwnd, GwlExstyle).ToInt64();
+        exStyle |= WsExToolwindow;
+        exStyle &= ~WsExAppwindow;
+        _ = SetWindowLongPtr(hwnd, GwlExstyle, new IntPtr(exStyle));
+    }
+
+    private const int GwlExstyle = -20;
+    private const long WsExToolwindow = 0x00000080L;
+    private const long WsExAppwindow = 0x00040000L;
     private const int SwHide = 0;
     private const int SwShow = 5;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr(nint hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr(nint hWnd, int nIndex, IntPtr dwNewLong);
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(nint hWnd, int nCmdShow);
