@@ -33,7 +33,7 @@ public sealed class TesseractOcrService
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                WorkingDirectory = runtimeRoot
+                WorkingDirectory = Path.GetDirectoryName(executablePath) ?? runtimeRoot
             };
             startInfo.ArgumentList.Add(inputPath);
             startInfo.ArgumentList.Add(outputBase);

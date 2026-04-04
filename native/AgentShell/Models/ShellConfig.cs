@@ -117,6 +117,8 @@ public sealed class LocalModelConfig
 
     [JsonPropertyName("supports_thinking")]
     public bool SupportsThinking { get; set; }
+
+    public string ContextSummary => $"Context: {ContextSize} · GPU layers: {GpuLayers}";
 }
 
 public sealed class RuntimeItem
