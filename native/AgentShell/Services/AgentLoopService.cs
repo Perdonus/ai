@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using AgentShell.Models;
@@ -27,6 +28,7 @@ public sealed class AgentLoopService
         string finalAnswer = string.Empty;
         var runtimeTools = await _runtimeTools.LoadAsync();
         var toolPrompt = _runtimeTools.BuildToolPrompt(runtimeTools);
+        var simpleOpenRequest = LooksLikeSimpleOpenRequest(prompt);
 
         for (var step = 1; step <= 8; step++)
         {
@@ -66,6 +68,7 @@ public sealed class AgentLoopService
                 analysis,
                 toolPrompt,
                 cancellationToken);
+            StartupLogService.Info($"Step {step} decision: {decision.Action.Type}; target={decision.Action.Target ?? "(none)"}; thought={TrimForLog(decision.Thought)}");
 
             if (_chat.ShouldShowPrimaryThinking(config) && !string.IsNullOrWhiteSpace(decision.Thought))
             {
@@ -81,6 +84,16 @@ public sealed class AgentLoopService
             {
                 AppendThought(visibleThoughts, step, $"Действие: {actionSummary}");
                 progress?.Report(new AgentLoopProgress($"Шаг {step}: действие", visibleThoughts.ToString(), finalAnswer));
+            }
+
+            if (simpleOpenRequest &&
+                decision.Action.Type == "open_app" &&
+                !string.IsNullOrWhiteSpace(decision.Action.Target) &&
+                IsAppLikelyRunning(decision.Action.Target))
+            {
+                finalAnswer = $"Открыл {decision.Action.Target}.";
+                session.History.Add($"Ассистент: {finalAnswer}");
+                return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty);
             }
 
             if (decision.Action.Type == "finish")
@@ -354,6 +367,67 @@ Desktop context:
         return exception.Message.Contains("image input is not enabled", StringComparison.OrdinalIgnoreCase) ||
                exception.Message.Contains("vision", StringComparison.OrdinalIgnoreCase) ||
                exception.Message.Contains("multimodal", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeSimpleOpenRequest(string prompt)
+    {
+        var normalized = prompt.Trim().ToLowerInvariant();
+        if (normalized.Length > 80 || normalized.Contains('\n') || normalized.Contains(','))
+        {
+            return false;
+        }
+
+        return normalized.StartsWith("открой ", StringComparison.OrdinalIgnoreCase) ||
+               normalized.StartsWith("запусти ", StringComparison.OrdinalIgnoreCase) ||
+               normalized.StartsWith("open ", StringComparison.OrdinalIgnoreCase) ||
+               normalized.StartsWith("launch ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAppLikelyRunning(string target)
+    {
+        foreach (var processName in CandidateProcessNames(target))
+        {
+            try
+            {
+                if (Process.GetProcessesByName(processName).Length > 0)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> CandidateProcessNames(string target)
+    {
+        var normalized = Path.GetFileNameWithoutExtension(target.Trim()).ToLowerInvariant();
+        return normalized switch
+        {
+            "notepad" => ["notepad"],
+            "calc" => ["CalculatorApp", "calc"],
+            "wt" => ["WindowsTerminal", "wt"],
+            "powershell" => ["powershell", "pwsh"],
+            "cmd" => ["cmd"],
+            "mspaint" => ["mspaint"],
+            "msedge" => ["msedge"],
+            "chrome" => ["chrome"],
+            _ => [normalized]
+        };
+    }
+
+    private static string TrimForLog(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "(empty)";
+        }
+
+        var singleLine = text.Replace("\r", " ").Replace("\n", " ").Trim();
+        return singleLine.Length <= 220 ? singleLine : $"{singleLine[..220]}...";
     }
 
     private static void AppendThought(StringBuilder builder, int step, string line)
