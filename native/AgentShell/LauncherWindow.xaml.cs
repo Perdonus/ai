@@ -117,6 +117,13 @@ public sealed partial class LauncherWindow : Window
 
     private void PromptBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (e.Key == Windows.System.VirtualKey.RightControl)
+        {
+            HideAnimated();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
             HandlePrompt(PromptBox.Text.Trim());

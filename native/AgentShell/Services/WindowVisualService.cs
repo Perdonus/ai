@@ -13,7 +13,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 {
     private const int LauncherWidth = 468;
     private const int LauncherHeight = 108;
-    private const int VisibleMargin = 16;
+    private const int VisibleMargin = 40;
     private const int HiddenOffset = 36;
 
     private readonly Window _window = window;
