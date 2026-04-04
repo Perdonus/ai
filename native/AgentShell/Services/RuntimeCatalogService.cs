@@ -18,6 +18,7 @@ public sealed class RuntimeCatalogService
     private static async Task<IReadOnlyList<RuntimeItem>> LoadRuntimeItemsAsync(string folderName, string manifestName)
     {
         List<RuntimeItem> items = [];
+        HashSet<string> seenIds = new(StringComparer.OrdinalIgnoreCase);
         foreach (var root in RuntimeRoots(folderName))
         {
             if (!Directory.Exists(root))
@@ -37,7 +38,7 @@ public sealed class RuntimeCatalogService
                 {
                     using var document = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath));
                     var rootElement = document.RootElement;
-                    items.Add(new RuntimeItem
+                    var item = new RuntimeItem
                     {
                         Id = ReadString(rootElement, "id") ?? Path.GetFileName(directory),
                         Name = ReadString(rootElement, "name") ?? Path.GetFileName(directory),
@@ -45,7 +46,14 @@ public sealed class RuntimeCatalogService
                         HasSettings = rootElement.TryGetProperty("settings_schema", out _),
                         SupportsDataInput = rootElement.TryGetProperty("accepts_data_input", out var acceptsData) && acceptsData.GetBoolean(),
                         RootPath = directory
-                    });
+                    };
+
+                    if (!seenIds.Add(item.Id))
+                    {
+                        continue;
+                    }
+
+                    items.Add(item);
                 }
                 catch
                 {
@@ -58,8 +66,8 @@ public sealed class RuntimeCatalogService
 
     private static IEnumerable<string> RuntimeRoots(string folderName)
     {
-        yield return Path.Combine("Z:\\ai", folderName);
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DesktopAIAgent", folderName);
+        yield return Path.Combine("Z:\\ai", folderName);
     }
 
     private static string? ReadString(JsonElement element, string propertyName)

@@ -11,6 +11,7 @@ public sealed class RuntimeToolService
     public async Task<IReadOnlyList<RuntimeToolManifest>> LoadAsync()
     {
         List<RuntimeToolManifest> tools = [];
+        HashSet<string> seenIds = new(StringComparer.OrdinalIgnoreCase);
         foreach (var root in RuntimeRoots())
         {
             if (!Directory.Exists(root))
@@ -30,7 +31,7 @@ public sealed class RuntimeToolService
                 {
                     using var document = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath));
                     var rootElement = document.RootElement;
-                    tools.Add(new RuntimeToolManifest
+                    var tool = new RuntimeToolManifest
                     {
                         Id = ReadString(rootElement, "id") ?? Path.GetFileName(directory),
                         Name = ReadString(rootElement, "name") ?? Path.GetFileName(directory),
@@ -41,7 +42,14 @@ public sealed class RuntimeToolService
                         SystemPrompt = ReadString(rootElement, "system_prompt") ?? string.Empty,
                         ParameterHints = ReadStringMap(rootElement, "parameter_hints"),
                         RootPath = directory
-                    });
+                    };
+
+                    if (!seenIds.Add(tool.Id))
+                    {
+                        continue;
+                    }
+
+                    tools.Add(tool);
                 }
                 catch (Exception ex)
                 {
@@ -195,8 +203,8 @@ public sealed class RuntimeToolService
 
     private static IEnumerable<string> RuntimeRoots()
     {
-        yield return Path.Combine("Z:\\ai", "tools");
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DesktopAIAgent", "tools");
+        yield return Path.Combine("Z:\\ai", "tools");
     }
 
     private static string? ReadString(JsonElement element, string propertyName)
