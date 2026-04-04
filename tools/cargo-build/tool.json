@@ -1,0 +1,17 @@
+{
+  "id": "cargo-build",
+  "name": "Cargo Build",
+  "description": "Build a Rust project with cargo.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this for Rust projects when you need to compile the current workspace or crate.",
+  "parameter_hints": {
+    "repo_path": "absolute Cargo project path"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "cd /d \"{{repo_path}}\" && cargo build"
+  ],
+  "version": "0.1.0"
+}

@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AgentShell.Models;
 
 namespace AgentShell.Services;
@@ -11,13 +12,20 @@ public sealed class AgentChatService
 {
     private static readonly TimeSpan[] RetryDelays =
     [
-        TimeSpan.FromSeconds(8),
-        TimeSpan.FromSeconds(16),
-        TimeSpan.FromSeconds(32),
-        TimeSpan.FromSeconds(48)
+        TimeSpan.FromSeconds(10),
+        TimeSpan.FromSeconds(20),
+        TimeSpan.FromSeconds(35)
     ];
 
-    private static readonly TimeSpan RequestSpacing = TimeSpan.FromMilliseconds(1250);
+    private static readonly IReadOnlyDictionary<string, TimeSpan> RequestSpacingByProvider = new Dictionary<string, TimeSpan>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["sosiskibot"] = TimeSpan.FromSeconds(4),
+        ["openrouter"] = TimeSpan.FromSeconds(3),
+        ["huggingface"] = TimeSpan.FromSeconds(3),
+        ["gemini"] = TimeSpan.FromSeconds(2.5),
+        ["mistral"] = TimeSpan.FromSeconds(2.5),
+        ["openai"] = TimeSpan.FromSeconds(2)
+    };
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> ProviderLocks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, DateTimeOffset> ProviderAvailableAt = new(StringComparer.OrdinalIgnoreCase);
 
@@ -37,6 +45,13 @@ public sealed class AgentChatService
     {
         return config.Models.UseSeparateAnalysis && !string.IsNullOrWhiteSpace(config.Models.Analysis.Model)
             ? config.Models.Analysis
+            : null;
+    }
+
+    public ModelRoute? ResolveOcrRoute(ShellConfig config)
+    {
+        return config.Models.UseSeparateOcr && !string.IsNullOrWhiteSpace(config.Models.Ocr.Model)
+            ? config.Models.Ocr
             : null;
     }
 
@@ -80,7 +95,8 @@ public sealed class AgentChatService
         ModelRoute route,
         string systemPrompt,
         string userPrompt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ScreenSnapshot? screenshot = null)
     {
         var provider = ResolveProvider(route, config, out var apiKey);
         var throttleKey = BuildThrottleKey(provider);
@@ -88,9 +104,9 @@ public sealed class AgentChatService
 
         return provider.Id switch
         {
-            "gemini" => await RequestGeminiAsync(provider, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken),
-            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", throttleKey, route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken),
-            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken)
+            "gemini" => await RequestGeminiAsync(provider, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
+            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
+            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken)
         };
     }
 
@@ -279,24 +295,24 @@ public sealed class AgentChatService
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
                 if (response.IsSuccessStatusCode)
                 {
-                    ReserveProvider(throttleKey, RequestSpacing);
+                    ReserveProvider(throttleKey, GetRequestSpacing(throttleKey));
                     return body;
                 }
 
-                var delay = GetRetryDelay(response, attempt);
+                var delay = GetRetryDelay(response, body, attempt);
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    ReserveProvider(throttleKey, delay + GetRequestSpacing(throttleKey));
+                    throw new ProviderRateLimitException(throttleKey, delay, body);
+                }
+
                 if (attempt < RetryDelays.Length && IsRetryable(response.StatusCode))
                 {
-                    ReserveProvider(throttleKey, delay + RequestSpacing);
+                    ReserveProvider(throttleKey, delay + GetRequestSpacing(throttleKey));
                     StartupLogService.Warn(
                         $"Provider throttled or failed temporarily on {endpointLabel}. provider={throttleKey}. status={(int)response.StatusCode}. retry_in={delay.TotalSeconds:0}s. attempt={attempt + 1}");
                     await Task.Delay(delay, cancellationToken);
                     continue;
-                }
-
-                if (response.StatusCode == HttpStatusCode.TooManyRequests)
-                {
-                    ReserveProvider(throttleKey, delay + TimeSpan.FromSeconds(4));
-                    throw new ProviderRateLimitException(throttleKey, delay, body);
                 }
 
                 var prefix = response.StatusCode == HttpStatusCode.TooManyRequests
@@ -316,12 +332,11 @@ public sealed class AgentChatService
     private static bool IsRetryable(HttpStatusCode statusCode)
     {
         var numeric = (int)statusCode;
-        return statusCode == HttpStatusCode.TooManyRequests ||
-               statusCode == HttpStatusCode.RequestTimeout ||
+        return statusCode == HttpStatusCode.RequestTimeout ||
                numeric >= 500;
     }
 
-    private static TimeSpan GetRetryDelay(HttpResponseMessage response, int attempt)
+    private static TimeSpan GetRetryDelay(HttpResponseMessage response, string body, int attempt)
     {
         var retryAfter = response.Headers.RetryAfter;
         if (retryAfter?.Delta is { } delta && delta > TimeSpan.Zero)
@@ -338,7 +353,34 @@ public sealed class AgentChatService
             }
         }
 
+        var bodyDelay = TryExtractRetryDelayFromBody(body);
+        if (bodyDelay is not null)
+        {
+            return ClampDelay(bodyDelay.Value);
+        }
+
         return RetryDelays[Math.Min(attempt, RetryDelays.Length - 1)];
+    }
+
+    private static TimeSpan? TryExtractRetryDelayFromBody(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        var retryAfterMatch = Regex.Match(
+            body,
+            "(?:retry_after|retryAfter|try again in|подожд(?:и|ать)\\s+примерно)\\D{0,10}(\\d{1,4})",
+            RegexOptions.IgnoreCase);
+        if (retryAfterMatch.Success &&
+            int.TryParse(retryAfterMatch.Groups[1].Value, out var seconds) &&
+            seconds > 0)
+        {
+            return TimeSpan.FromSeconds(seconds);
+        }
+
+        return null;
     }
 
     private static TimeSpan ClampDelay(TimeSpan delay)
@@ -356,6 +398,13 @@ public sealed class AgentChatService
     private static string BuildThrottleKey(ProviderDescriptor provider)
     {
         return provider.Id.Trim().ToLowerInvariant();
+    }
+
+    private static TimeSpan GetRequestSpacing(string throttleKey)
+    {
+        return RequestSpacingByProvider.TryGetValue(throttleKey, out var spacing)
+            ? spacing
+            : TimeSpan.FromSeconds(2.5);
     }
 
     private static async Task WaitForProviderAvailabilityAsync(string throttleKey, CancellationToken cancellationToken)

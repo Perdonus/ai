@@ -22,7 +22,11 @@ public sealed class DesktopActionService
         ["паинт"] = "mspaint",
         ["браузер"] = "browser",
         ["browser"] = "browser",
+        ["гугл"] = "chrome",
+        ["гугл хром"] = "chrome",
+        ["хром"] = "chrome",
         ["edge"] = "msedge",
+        ["эдж"] = "msedge",
         ["microsoft edge"] = "msedge",
         ["chrome"] = "chrome",
         ["google chrome"] = "chrome",
@@ -91,6 +95,12 @@ public sealed class DesktopActionService
         _input.TypeText(spec.RunCommand);
         await _input.WaitAsync(160, cancellationToken);
         _input.PressKey("ENTER");
+    }
+
+    public Task OpenBrowserAsync(string? url, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return OpenUrlAsync(string.IsNullOrWhiteSpace(url) ? "https://www.google.com" : url, cancellationToken);
     }
 
     public Task OpenUrlAsync(string url, CancellationToken cancellationToken)

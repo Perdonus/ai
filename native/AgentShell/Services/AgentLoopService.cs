@@ -8,7 +8,7 @@ namespace AgentShell.Services;
 
 public sealed class AgentLoopService
 {
-    private const int MaxSteps = 14;
+    private const int MaxSteps = 12;
 
     private readonly AgentChatService _chat = new();
     private readonly ScreenCaptureService _screen = new();
@@ -54,14 +54,29 @@ public sealed class AgentLoopService
             var snapshot = _screen.Capture();
             var context = _context.Capture();
             var clipboardPreview = _clipboard.GetPreview();
+            var ocrText = string.Empty;
 
             string analysis = string.Empty;
             var analysisRoute = _chat.ResolveAnalysisRoute(config);
+            var ocrRoute = _chat.ResolveOcrRoute(config);
             try
             {
+                if (ShouldRunSeparateOcr(config, ocrRoute))
+                {
+                    progress?.Report(new AgentLoopProgress($"Шаг {step}: читаю текст на экране", visibleThoughts.ToString(), finalAnswer));
+                    ocrText = await _chat.RequestTextAsync(
+                        config,
+                        ocrRoute!,
+                        "Ты OCR-модель desktop-агента Windows. Аккуратно распознай текст, который реально виден на скриншоте. Верни только полезный текст без комментариев, без JSON и без объяснений.",
+                        BuildOcrPrompt(prompt, step, context),
+                        cancellationToken,
+                        snapshot);
+                    ocrText = NormalizeOcrText(ocrText);
+                }
+
                 if (ShouldRunSeparateAnalysis(config, analysisRoute, step))
                 {
-                    var analysisPrompt = BuildAnalysisPrompt(session, prompt, step, context, clipboardPreview);
+                    var analysisPrompt = BuildAnalysisPrompt(session, prompt, step, context, clipboardPreview, ocrText);
                     analysis = await _chat.RequestTextAsync(
                         config,
                         analysisRoute!,
@@ -84,6 +99,7 @@ public sealed class AgentLoopService
                     snapshot,
                     context,
                     clipboardPreview,
+                    ocrText,
                     analysis,
                     toolPrompt,
                     cancellationToken);
@@ -115,7 +131,8 @@ public sealed class AgentLoopService
                     repeatedActionCount = 1;
                 }
 
-                if (repeatedActionCount >= 3 && decision.Action.Type != "finish")
+                var repetitionLimit = decision.Action.Type is "observe" or "wait" ? 2 : 3;
+                if (repeatedActionCount >= repetitionLimit && decision.Action.Type != "finish")
                 {
                     finalAnswer = ResolveStuckMessage(decision);
                     session.History.Add($"Ассистент: {finalAnswer}");
@@ -138,6 +155,20 @@ public sealed class AgentLoopService
                     await OpenedAppLooksReadyAsync(decision.Action.Target, cancellationToken))
                 {
                     finalAnswer = $"Открыл {decision.Action.Target}.";
+                    session.History.Add($"Ассистент: {finalAnswer}");
+                    return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
+                }
+
+                if (simpleOpenRequest && decision.Action.Type is "open_browser" or "open_url" or "open_path")
+                {
+                    finalAnswer = decision.Action.Type switch
+                    {
+                        "open_browser" => string.IsNullOrWhiteSpace(decision.Action.Target)
+                            ? "Открыла браузер."
+                            : $"Открыла браузер: {decision.Action.Target}.",
+                        "open_url" => $"Открыла {decision.Action.Target}.",
+                        _ => $"Открыла {decision.Action.Target}."
+                    };
                     session.History.Add($"Ассистент: {finalAnswer}");
                     return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
                 }
@@ -176,6 +207,7 @@ public sealed class AgentLoopService
         ScreenSnapshot snapshot,
         DesktopContextSnapshot context,
         string clipboardPreview,
+        string ocrText,
         string analysis,
         string toolPrompt,
         CancellationToken cancellationToken)
@@ -189,6 +221,7 @@ public sealed class AgentLoopService
             snapshot,
             context,
             clipboardPreview,
+            ocrText,
             analysis,
             screenshotAttached: true);
 
@@ -216,6 +249,7 @@ public sealed class AgentLoopService
             snapshot,
             context,
             clipboardPreview,
+            ocrText,
             analysis,
             screenshotAttached: false);
 
@@ -238,6 +272,11 @@ public sealed class AgentLoopService
                 EnsureTarget(action, "open_app");
                 await _desktop.OpenAppVisualAsync(action.Target!, cancellationToken);
                 return $"Открыла {action.Target}";
+            case "open_browser":
+                await _desktop.OpenBrowserAsync(action.Target, cancellationToken);
+                return string.IsNullOrWhiteSpace(action.Target)
+                    ? "Открыла браузер"
+                    : $"Открыла браузер: {action.Target}";
             case "open_url":
                 EnsureTarget(action, "open_url");
                 await _desktop.OpenUrlAsync(action.Target!, cancellationToken);
@@ -299,6 +338,10 @@ public sealed class AgentLoopService
                 MoveMouseIfNeeded(snapshot, action);
                 _input.MouseUp(NormalizeButton(action.Button));
                 return $"Отпустила кнопку мыши {NormalizeButton(action.Button)}";
+            case "mouse_hold":
+                MoveMouseIfNeeded(snapshot, action);
+                await _input.HoldMouseAsync(NormalizeButton(action.Button), action.Milliseconds ?? 450, cancellationToken);
+                return $"Удерживала кнопку мыши {NormalizeButton(action.Button)} {Math.Clamp(action.Milliseconds ?? 450, 50, 5000)} мс";
             case "click":
                 MoveMouseIfNeeded(snapshot, action);
                 _input.Click(NormalizeButton(action.Button));
@@ -353,7 +396,8 @@ public sealed class AgentLoopService
         string prompt,
         int step,
         DesktopContextSnapshot context,
-        string clipboardPreview)
+        string clipboardPreview,
+        string ocrText)
     {
         return $"""
 Текущий запрос пользователя: {prompt}
@@ -364,7 +408,26 @@ public sealed class AgentLoopService
 Desktop context:
 {context.ToPromptString(clipboardPreview)}
 
+OCR со скриншота:
+{FormatSupplement(ocrText)}
+
 Дай краткую мысль о следующем одном шаге.
+""";
+    }
+
+    private static string BuildOcrPrompt(
+        string prompt,
+        int step,
+        DesktopContextSnapshot context)
+    {
+        return $"""
+Текущий запрос пользователя: {prompt}
+Номер шага: {step}
+
+Desktop context:
+{context.ToPromptString("буфер не запрашивался")}
+
+Считай и верни важный видимый текст со скриншота.
 """;
     }
 
@@ -384,7 +447,7 @@ Desktop context:
 {
   "thought": "краткая мысль на русском",
   "action": {
-    "type": "observe|await_user|open_app|open_url|open_path|type_text|set_clipboard|paste_clipboard|copy_selection|press_key|key_combo|key_down|key_up|hold_key|mouse_move|mouse_down|mouse_up|click|right_click|double_click|drag|scroll|wait|run_tool|finish",
+    "type": "observe|await_user|open_app|open_browser|open_url|open_path|type_text|set_clipboard|paste_clipboard|copy_selection|press_key|key_combo|key_down|key_up|hold_key|mouse_move|mouse_down|mouse_up|mouse_hold|click|right_click|double_click|drag|scroll|wait|run_tool|finish",
     "target": "строка или null",
     "text": "строка или null",
     "key": "строка или null",
@@ -407,17 +470,25 @@ Desktop context:
 - Если нужна информация, секрет, код, подтверждение, выбор или данные, которые должен дать пользователь, используй await_user.
 - Если задача завершена, используй finish и дай final_response.
 - Если надо открыть приложение, используй open_app.
+- Если надо просто открыть браузер или вкладку с сайтом, используй open_browser или open_url.
 - Если надо открыть сайт, используй open_url.
 - Если надо открыть файл или папку, используй open_path.
 - Если надо ввести текст в активное окно, используй type_text.
 - Для буфера обмена используй set_clipboard, paste_clipboard и copy_selection.
 - Для клавиатуры используй press_key, key_combo, key_down, key_up, hold_key.
 - Для мыши используй mouse_move, mouse_down, mouse_up, click, right_click, double_click, drag, scroll.
+- Если нужно просто удерживать кнопку мыши на месте, используй mouse_hold.
 - Для рисования и выделения чаще всего подходят drag, mouse_down/mouse_up и клавиши-модификаторы.
 - Координаты x/y/x2/y2 относительные к присланному скриншоту.
 - Не повторяй один и тот же шаг бесконечно. Если упёрлась в необходимость данных или подтверждения, остановись через await_user.
 - Если пользователь просил только открыть приложение, сайт, файл или папку, после успешного открытия заверши задачу.
 - Помни, что ты агент на реальном ПК. Не отвечай как обычный чат без действий, если задачу нужно выполнить руками.
+
+Примеры:
+- "Открой браузер" -> open_browser, потом finish.
+- "Нажми Ctrl+L" -> key_combo с keys ["CTRL","L"].
+- "Перетащи ползунок вправо" -> observe, потом drag с координатами.
+- "Поиграем в блокноте" -> открыть блокнот, дождаться его, печатать туда, а не отвечать обычным чат-текстом.
 
 {{toolPrompt}}
 """;
@@ -430,6 +501,7 @@ Desktop context:
         ScreenSnapshot snapshot,
         DesktopContextSnapshot context,
         string clipboardPreview,
+        string ocrText,
         string analysis,
         bool screenshotAttached)
     {
@@ -446,8 +518,11 @@ Desktop context:
 Desktop context:
 {context.ToPromptString(clipboardPreview)}
 
+OCR со скриншота:
+{FormatSupplement(ocrText)}
+
 Дополнительный анализ:
-{analysis}
+{FormatSupplement(analysis)}
 
 Выбери ОДИН следующий шаг.
 """;
@@ -464,7 +539,7 @@ Desktop context:
             ?? throw new InvalidOperationException("Failed to deserialize agent decision.");
 
         decision.Action ??= new AgentAction { Type = "observe" };
-        decision.Action.Type = string.IsNullOrWhiteSpace(decision.Action.Type) ? "observe" : decision.Action.Type.Trim().ToLowerInvariant();
+        decision.Action = NormalizeAction(decision, decision.Action);
         decision.Action.Arguments ??= [];
         return decision;
     }
@@ -516,6 +591,16 @@ Desktop context:
         }
 
         return step == 1 || step % 3 == 0;
+    }
+
+    private static bool ShouldRunSeparateOcr(ShellConfig config, ModelRoute? ocrRoute)
+    {
+        if (!config.Models.UseSeparateOcr || ocrRoute is null)
+        {
+            return false;
+        }
+
+        return !RoutesEqual(ocrRoute, config.Models.Primary);
     }
 
     private static bool RoutesEqual(ModelRoute left, ModelRoute right)
@@ -628,6 +713,158 @@ Desktop context:
             arguments);
     }
 
+    private static AgentAction NormalizeAction(AgentDecision decision, AgentAction action)
+    {
+        var originalType = action.Type;
+        action.Type = NormalizeActionType(action.Type);
+
+        if (action.Type == "open_browser")
+        {
+            action.Target = string.IsNullOrWhiteSpace(action.Target) ? "https://www.google.com" : action.Target;
+        }
+
+        if ((action.Type == "press_key" || action.Type == "hold_key") &&
+            string.IsNullOrWhiteSpace(action.Key) &&
+            !string.IsNullOrWhiteSpace(action.Target))
+        {
+            action.Key = action.Target;
+        }
+
+        if (action.Type == "type_text" &&
+            string.IsNullOrWhiteSpace(action.Text) &&
+            !string.IsNullOrWhiteSpace(action.Target))
+        {
+            action.Text = action.Target;
+        }
+
+        if (action.Type == "key_combo")
+        {
+            action.Keys = ExpandCombo(action.Keys, action.Key, action.Target);
+        }
+
+        if (string.Equals(originalType, "scroll_up", StringComparison.OrdinalIgnoreCase) && action.Delta is null)
+        {
+            action.Delta = 360;
+        }
+        else if (action.Type == "scroll" && action.Delta is null)
+        {
+            action.Delta = -360;
+        }
+
+        if (LooksLikeAwaitUser(decision, action))
+        {
+            action.Type = "await_user";
+            action.Text ??= ExtractAwaitUserText(decision);
+        }
+
+        return action;
+    }
+
+    private static string NormalizeActionType(string? rawType)
+    {
+        var normalized = string.IsNullOrWhiteSpace(rawType)
+            ? "observe"
+            : rawType.Trim().ToLowerInvariant().Replace('-', '_');
+
+        return normalized switch
+        {
+            "open_application" or "launch_app" or "launch_application" => "open_app",
+            "open_browser_tab" or "launch_browser" => "open_browser",
+            "type" or "write_text" or "input_text" or "enter_text" => "type_text",
+            "press" or "keypress" => "press_key",
+            "shortcut" or "hotkey" or "keyboard_combo" or "press_keys" => "key_combo",
+            "ask_user" or "request_user_input" or "need_user_input" => "await_user",
+            "done" or "complete" or "completed" or "finish_task" => "finish",
+            "move_mouse" => "mouse_move",
+            "hold_mouse" => "mouse_hold",
+            "mouse_drag" or "drag_mouse" or "slide" => "drag",
+            "scroll_down" => "scroll",
+            "scroll_up" => "scroll",
+            "doubleclick" => "double_click",
+            "click_right" => "right_click",
+            "click_left" => "click",
+            _ => normalized
+        };
+    }
+
+    private static List<string>? ExpandCombo(IReadOnlyList<string>? existingKeys, string? key, string? target)
+    {
+        if (existingKeys is { Count: > 0 })
+        {
+            return existingKeys.ToList();
+        }
+
+        var source = !string.IsNullOrWhiteSpace(key) ? key : target;
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return null;
+        }
+
+        return source
+            .Split(['+', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => part.Trim().ToUpperInvariant())
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToList();
+    }
+
+    private static bool LooksLikeAwaitUser(AgentDecision decision, AgentAction action)
+    {
+        if (action.Type == "await_user" || action.Type == "finish")
+        {
+            return false;
+        }
+
+        var signal = string.Join(
+            " ",
+            new[] { decision.Thought, decision.FinalResponse, action.Text, action.Target }
+                .Where(value => !string.IsNullOrWhiteSpace(value)))
+            .ToLowerInvariant();
+
+        if (string.IsNullOrWhiteSpace(signal))
+        {
+            return false;
+        }
+
+        if (!(action.Type is "observe" or "wait" or "run_tool"))
+        {
+            return false;
+        }
+
+        string[] markers =
+        [
+            "нужны данные",
+            "нужен логин",
+            "нужен пароль",
+            "нужен код",
+            "нужна капча",
+            "нужен api key",
+            "нужен api-key",
+            "нужен токен",
+            "нужно подтверждение",
+            "нужен выбор",
+            "введи",
+            "введите",
+            "пришли",
+            "скажи",
+            "дай мне",
+            "подтверди",
+            "подтвердите"
+        ];
+
+        return markers.Any(signal.Contains);
+    }
+
+    private static string ExtractAwaitUserText(AgentDecision decision)
+    {
+        var message = decision.FinalResponse ??
+                      decision.Action?.Text ??
+                      decision.Thought;
+
+        return string.IsNullOrWhiteSpace(message)
+            ? "Нужны данные от тебя, чтобы продолжить."
+            : message.Trim();
+    }
+
     private static void EnsureTarget(AgentAction action, string actionType)
     {
         if (string.IsNullOrWhiteSpace(action.Target))
@@ -709,6 +946,26 @@ Desktop context:
         }
 
         builder.Append($"Шаг {step}. {line.Trim()}");
+    }
+
+    private static string NormalizeOcrText(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var cleaned = value.Trim()
+            .Replace("```", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("OCR:", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Trim();
+
+        return cleaned.Length <= 1800 ? cleaned : $"{cleaned[..1800]}...";
+    }
+
+    private static string FormatSupplement(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "(нет данных)" : value.Trim();
     }
 }
 

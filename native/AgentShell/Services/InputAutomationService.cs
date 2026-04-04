@@ -70,6 +70,19 @@ public sealed class InputAutomationService
         }
     }
 
+    public async Task HoldMouseAsync(string button, int milliseconds, CancellationToken cancellationToken)
+    {
+        MouseDown(button);
+        try
+        {
+            await WaitAsync(milliseconds, cancellationToken);
+        }
+        finally
+        {
+            MouseUp(button);
+        }
+    }
+
     public void MoveMouse(int x, int y)
     {
         _ = SetCursorPos(x, y);
@@ -138,14 +151,15 @@ public sealed class InputAutomationService
         MouseDown(button);
         try
         {
-            var steps = Math.Clamp(milliseconds / 20, 4, 40);
+            await WaitAsync(70, cancellationToken);
+            var steps = Math.Clamp(milliseconds / 18, 6, 48);
             for (var step = 1; step <= steps; step++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var x = startX + ((endX - startX) * step / steps);
                 var y = startY + ((endY - startY) * step / steps);
                 MoveMouse(x, y);
-                await WaitAsync(Math.Max(10, milliseconds / steps), cancellationToken);
+                await WaitAsync(Math.Max(12, milliseconds / steps), cancellationToken);
             }
         }
         finally

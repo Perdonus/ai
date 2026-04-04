@@ -1,0 +1,17 @@
+{
+  "id": "make-directory",
+  "name": "Make Directory",
+  "description": "Create a directory if it does not exist.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this before downloads, clones, builds or exports when a target folder must exist.",
+  "parameter_hints": {
+    "path": "absolute directory path"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "mkdir \"{{path}}\""
+  ],
+  "version": "0.1.0"
+}

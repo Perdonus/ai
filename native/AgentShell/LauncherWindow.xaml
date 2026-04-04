@@ -10,7 +10,7 @@
         <Border
             x:Name="ShellPanel"
             Margin="0"
-            Padding="10"
+            Padding="12"
             Background="#0A1017"
             BorderBrush="Transparent"
             BorderThickness="0"
@@ -19,8 +19,9 @@
             <Grid RowDefinitions="Auto,Auto">
                 <TextBox
                     x:Name="PromptBox"
-                    Height="46"
-                    Padding="16,0"
+                    Height="48"
+                    Padding="16,10,16,10"
+                    VerticalContentAlignment="Center"
                     automation:AutomationProperties.AutomationId="PromptBox"
                     PlaceholderText="Напиши действие"
                     FontSize="17"
