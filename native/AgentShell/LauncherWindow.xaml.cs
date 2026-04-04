@@ -14,19 +14,27 @@ public sealed partial class LauncherWindow : Window
 
     public LauncherWindow()
     {
-        InitializeComponent();
-        StartupLogService.Info("LauncherWindow initialized.");
+        try
+        {
+            InitializeComponent();
+            StartupLogService.Info("LauncherWindow initialized.");
 
-        _visuals = new WindowVisualService(this, ShellPanel);
-        _visuals.InitializeLauncherChrome();
-        _visuals.MoveTopRight(false);
-        StartupLogService.Info("Launcher visuals initialized.");
+            _visuals = new WindowVisualService(this, ShellPanel);
+            _visuals.InitializeLauncherChrome();
+            _visuals.MoveTopRight(false);
+            StartupLogService.Info("Launcher visuals initialized.");
 
-        _hotkey = new GlobalHotkeyService(this, 7001, 0xA3);
-        _hotkey.HotkeyPressed += async (_, _) => await ToggleAsync();
-        StartupLogService.Info("Global hotkey registered for Right Ctrl.");
+            _hotkey = new GlobalHotkeyService(this, 7001, 0xA3);
+            _hotkey.HotkeyPressed += async (_, _) => await ToggleAsync();
+            StartupLogService.Info("Global hotkey registered for Right Ctrl.");
 
-        Activated += LauncherWindow_Activated;
+            Activated += LauncherWindow_Activated;
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Error($"LauncherWindow constructor failed: {ex}");
+            throw;
+        }
     }
 
     public async Task ToggleAsync()
