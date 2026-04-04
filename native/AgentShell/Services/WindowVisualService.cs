@@ -79,6 +79,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         {
             MoveTopRight(true);
             _window.Activate();
+            BringToFront();
         }
 
         visual.StartAnimation("Offset", offset);
@@ -124,13 +125,45 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         StartupLogService.Info($"Launcher extended window style set to 0x{exStyle:X}.");
     }
 
+    private void BringToFront()
+    {
+        var hwnd = WindowNative.GetWindowHandle(_window);
+        _ = ShowWindow(hwnd, SwShow);
+        _ = SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0, SwpNomove | SwpNosize);
+        _ = SetWindowPos(hwnd, HwndNotopmost, 0, 0, 0, 0, SwpNomove | SwpNosize);
+        _ = BringWindowToTop(hwnd);
+        _ = SetForegroundWindow(hwnd);
+        _ = SetActiveWindow(hwnd);
+        StartupLogService.Info("Launcher bring-to-front sequence executed.");
+    }
+
     private const int GwlExstyle = -20;
+    private const int SwShow = 5;
+    private const uint SwpNosize = 0x0001;
+    private const uint SwpNomove = 0x0002;
     private const long WsExToolwindow = 0x00000080L;
     private const long WsExAppwindow = 0x00040000L;
+    private static readonly nint HwndTopmost = new(-1);
+    private static readonly nint HwndNotopmost = new(-2);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     private static extern IntPtr GetWindowLongPtr(nint hWnd, int nIndex);
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     private static extern IntPtr SetWindowLongPtr(nint hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool BringWindowToTop(nint hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetForegroundWindow(nint hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint SetActiveWindow(nint hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool ShowWindow(nint hWnd, int nCmdShow);
 }
