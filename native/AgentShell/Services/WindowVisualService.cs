@@ -1,4 +1,5 @@
 using Microsoft.UI.Composition;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Hosting;
@@ -16,6 +17,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
     private readonly Window _window = window;
     private readonly FrameworkElement _animatedRoot = animatedRoot;
+    private readonly DispatcherQueue _dispatcherQueue = window.DispatcherQueue;
     private readonly AppWindow _appWindow = AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowNative.GetWindowHandle(window)));
 
     public void InitializeLauncherChrome()
@@ -81,7 +83,29 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
         if (!show)
         {
-            MoveTopRight(false);
+            await EnqueueAsync(() => MoveTopRight(false));
         }
+    }
+
+    private Task EnqueueAsync(Action action)
+    {
+        var tcs = new TaskCompletionSource();
+        if (!_dispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    action();
+                    tcs.SetResult();
+                }
+                catch (Exception ex)
+                {
+                    tcs.SetException(ex);
+                }
+            }))
+        {
+            tcs.SetException(new InvalidOperationException("Failed to enqueue work on the UI dispatcher."));
+        }
+
+        return tcs.Task;
     }
 }

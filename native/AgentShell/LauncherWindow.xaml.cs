@@ -58,9 +58,12 @@ public sealed partial class LauncherWindow : Window
         _ignoreNextDeactivation = true;
         ShowWindow(WindowNative.GetWindowHandle(this), 5);
         await _visuals.AnimateAsync(show: true);
-        _isVisible = true;
-        PromptBox.Focus(FocusState.Programmatic);
-        PromptBox.SelectAll();
+        await EnqueueOnUiAsync(() =>
+        {
+            _isVisible = true;
+            PromptBox.Focus(FocusState.Programmatic);
+            PromptBox.SelectAll();
+        });
     }
 
     public void HideAnimated(bool immediate = false)
@@ -157,6 +160,28 @@ public sealed partial class LauncherWindow : Window
                 StartupLogService.Error($"Hotkey toggle failed: {ex}");
             }
         });
+    }
+
+    private Task EnqueueOnUiAsync(Action action)
+    {
+        var tcs = new TaskCompletionSource();
+        if (!_dispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    action();
+                    tcs.SetResult();
+                }
+                catch (Exception ex)
+                {
+                    tcs.SetException(ex);
+                }
+            }))
+        {
+            tcs.SetException(new InvalidOperationException("Failed to enqueue work on the UI dispatcher."));
+        }
+
+        return tcs.Task;
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
