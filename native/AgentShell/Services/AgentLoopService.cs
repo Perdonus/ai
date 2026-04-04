@@ -63,15 +63,30 @@ public sealed class AgentLoopService
             {
                 if (ShouldRunSeparateOcr(config, ocrRoute))
                 {
-                    progress?.Report(new AgentLoopProgress($"Шаг {step}: читаю текст на экране", visibleThoughts.ToString(), finalAnswer));
-                    ocrText = await _chat.RequestTextAsync(
-                        config,
-                        ocrRoute!,
-                        "Ты OCR-модель desktop-агента Windows. Аккуратно распознай текст, который реально виден на скриншоте. Верни только полезный текст без комментариев, без JSON и без объяснений.",
-                        BuildOcrPrompt(prompt, step, context),
-                        cancellationToken,
-                        snapshot);
-                    ocrText = NormalizeOcrText(ocrText);
+                    if (_chat.CanLikelyUseImages(ocrRoute!))
+                    {
+                        progress?.Report(new AgentLoopProgress($"Шаг {step}: читаю текст на экране", visibleThoughts.ToString(), finalAnswer));
+                        try
+                        {
+                            ocrText = await _chat.RequestTextAsync(
+                                config,
+                                ocrRoute!,
+                                "Ты OCR-модель desktop-агента Windows. Аккуратно распознай текст, который реально виден на скриншоте. Верни только полезный текст без комментариев, без JSON и без объяснений.",
+                                BuildOcrPrompt(prompt, step, context),
+                                cancellationToken,
+                                snapshot);
+                            ocrText = NormalizeOcrText(ocrText);
+                        }
+                        catch (Exception ex) when (LooksLikeImageCapabilityFailure(ex))
+                        {
+                            StartupLogService.Warn($"Skipping OCR image request for {ocrRoute.Provider}/{ocrRoute.Model}: {ex.Message}");
+                            ocrText = string.Empty;
+                        }
+                    }
+                    else
+                    {
+                        StartupLogService.Warn($"Skipping OCR route {ocrRoute.Provider}/{ocrRoute.Model} because it does not look image-capable.");
+                    }
                 }
 
                 if (ShouldRunSeparateAnalysis(config, analysisRoute, step))
