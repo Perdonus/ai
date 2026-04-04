@@ -33,8 +33,6 @@ public sealed partial class LauncherWindow : Window
     private CancellationTokenSource? _promptCts;
     private bool _isBusy;
     private bool _isVisible;
-    private bool _ignoreNextDeactivation;
-
     public GlobalHotkeyService HotkeyService => _hotkey;
 
     public LauncherWindow()
@@ -57,7 +55,6 @@ public sealed partial class LauncherWindow : Window
             _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
             StartupLogService.Info("Global hotkey registered for Right Ctrl.");
 
-            Activated += LauncherWindow_Activated;
             ResetSessionUi();
         }
         catch (Exception ex)
@@ -89,7 +86,6 @@ public sealed partial class LauncherWindow : Window
 
         ApplyExpandedState(HasConversationContent());
         StartupLogService.Info("Showing launcher.");
-        _ignoreNextDeactivation = true;
         await _visuals.AnimateAsync(show: true);
         _isVisible = true;
         await FocusPromptAsync();
@@ -128,21 +124,6 @@ public sealed partial class LauncherWindow : Window
         await _visuals.AnimateAsync(show: false);
     }
 
-    private async void LauncherWindow_Activated(object sender, WindowActivatedEventArgs args)
-    {
-        if (_ignoreNextDeactivation)
-        {
-            _ignoreNextDeactivation = false;
-            return;
-        }
-
-        if (args.WindowActivationState == WindowActivationState.Deactivated && _isVisible)
-        {
-            await Task.Delay(40);
-            HideAnimated();
-        }
-    }
-
     private void PromptBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == Windows.System.VirtualKey.Enter)
@@ -157,10 +138,6 @@ public sealed partial class LauncherWindow : Window
             if (_isBusy)
             {
                 _promptCts?.Cancel();
-            }
-            else
-            {
-                HideAnimated();
             }
 
             e.Handled = true;
@@ -240,12 +217,39 @@ public sealed partial class LauncherWindow : Window
 
     private void ApplyExpandedState(bool expanded)
     {
-        _visuals.SetExpanded(expanded);
         ConversationContainer.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        if (expanded)
+        {
+            RefreshExpandedLayout();
+        }
+        else
+        {
+            _visuals.SetCompact();
+        }
+
         if (_isVisible)
         {
             _visuals.MoveTopRight();
         }
+    }
+
+    private void RefreshExpandedLayout()
+    {
+        ConversationPanel.UpdateLayout();
+        ConversationContainer.UpdateLayout();
+        ShellPanel.UpdateLayout();
+
+        var maxConversationHeight = _visuals.GetMaxConversationHeight();
+        ConversationScrollViewer.MaxHeight = maxConversationHeight;
+
+        ConversationPanel.UpdateLayout();
+        ConversationScrollViewer.UpdateLayout();
+
+        var desiredConversationHeight = Math.Min(
+            maxConversationHeight,
+            Math.Max(0, ConversationPanel.DesiredSize.Height + 16));
+
+        _visuals.SetExpandedToContent(desiredConversationHeight);
     }
 
     private async Task FocusPromptAsync()
@@ -460,6 +464,7 @@ public sealed partial class LauncherWindow : Window
         _turns.Add(turn);
         ConversationPanel.Children.Add(root);
         UpdateElapsedText(turn);
+        RefreshExpandedLayout();
         ScrollConversationToEnd();
         return turn;
     }
@@ -480,6 +485,7 @@ public sealed partial class LauncherWindow : Window
         var details = BuildDetailsText(update.Status, update.Thinking);
         turn.DetailsText.Text = details;
         RefreshTurnDetailsVisibility(turn);
+        RefreshExpandedLayout();
 
         if (!string.IsNullOrWhiteSpace(update.Answer))
         {
@@ -504,6 +510,7 @@ public sealed partial class LauncherWindow : Window
         }
 
         RefreshTurnDetailsVisibility(turn);
+        RefreshExpandedLayout();
 
         if (!string.IsNullOrWhiteSpace(result.Error))
         {
@@ -543,6 +550,7 @@ public sealed partial class LauncherWindow : Window
 
         UpdateElapsedText(turn);
         StopTurnTimerIfIdle();
+        RefreshExpandedLayout();
     }
 
     private void FailTurn(ConversationTurnView turn, string error)
@@ -555,6 +563,7 @@ public sealed partial class LauncherWindow : Window
         turn.ErrorBorder.Visibility = Visibility.Visible;
         UpdateElapsedText(turn);
         StopTurnTimerIfIdle();
+        RefreshExpandedLayout();
     }
 
     private void ToggleTurnDetails(ConversationTurnView turn)
@@ -569,6 +578,7 @@ public sealed partial class LauncherWindow : Window
         turn.DetailsBorder.Visibility = hasDetails && turn.DetailsExpanded
             ? Visibility.Visible
             : Visibility.Collapsed;
+        RefreshExpandedLayout();
     }
 
     private void TurnTimer_Tick(object? sender, object e)
@@ -655,8 +665,7 @@ public sealed partial class LauncherWindow : Window
     private void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         args.Cancel = true;
-        StartupLogService.Info("Launcher close intercepted, hiding instead.");
-        HideAnimated();
+        StartupLogService.Info("Launcher close intercepted and ignored.");
     }
 
     private AppWindow GetAppWindow()

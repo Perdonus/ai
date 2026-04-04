@@ -14,7 +14,8 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     private const int CompactWidth = 500;
     private const int CompactHeight = 72;
     private const int ExpandedWidth = 560;
-    private const int ExpandedHeight = 430;
+    private const int ExpandedExtraHeight = 36;
+    private const int MinExpandedHeight = 148;
     private const int VisibleMargin = 18;
     private const int SwHide = 0;
     private const int SwShow = 5;
@@ -43,17 +44,33 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         EnsureTaskbarWindowStyle();
         EnableTransparentHost();
         SuppressWindowFrame();
-        SetExpanded(false);
+        SetCompact();
         StartupLogService.Info("Launcher chrome initialized.");
     }
 
-    public void SetExpanded(bool expanded)
+    public void SetCompact()
     {
-        _expanded = expanded;
-        var width = expanded ? ExpandedWidth : CompactWidth;
-        var height = expanded ? ExpandedHeight : CompactHeight;
-        _appWindow.Resize(new SizeInt32(width, height));
-        StartupLogService.Info($"Launcher size mode set to {(expanded ? "expanded" : "compact")} {width}x{height}.");
+        _expanded = false;
+        _appWindow.Resize(new SizeInt32(CompactWidth, CompactHeight));
+        StartupLogService.Info($"Launcher size mode set to compact {CompactWidth}x{CompactHeight}.");
+    }
+
+    public void SetExpandedToContent(double desiredConversationHeight)
+    {
+        _expanded = true;
+        var workArea = GetCurrentMonitorWorkArea();
+        var maxWindowHeight = Math.Max(CompactHeight, workArea.Height - (VisibleMargin * 2));
+        var desiredHeight = CompactHeight + ExpandedExtraHeight + (int)Math.Ceiling(Math.Max(0, desiredConversationHeight));
+        var height = Math.Clamp(desiredHeight, MinExpandedHeight, maxWindowHeight);
+        _appWindow.Resize(new SizeInt32(ExpandedWidth, height));
+        StartupLogService.Info($"Launcher size mode set to expanded {ExpandedWidth}x{height}. desiredConversationHeight={desiredConversationHeight:0.##}; maxWindowHeight={maxWindowHeight}.");
+    }
+
+    public double GetMaxConversationHeight()
+    {
+        var workArea = GetCurrentMonitorWorkArea();
+        var maxWindowHeight = Math.Max(CompactHeight, workArea.Height - (VisibleMargin * 2));
+        return Math.Max(96, maxWindowHeight - CompactHeight - ExpandedExtraHeight);
     }
 
     public void HideImmediately()

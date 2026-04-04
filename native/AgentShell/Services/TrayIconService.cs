@@ -21,6 +21,7 @@ public sealed class TrayIconService : IDisposable
     private const uint WmLbuttonup = 0x0202;
     private const uint WmLbuttondblclk = 0x0203;
     private const uint WmRbuttonup = 0x0205;
+    private const uint WmContextmenu = 0x007B;
     private const uint WmNull = 0x0000;
     private const uint OpenCommandId = 1001;
     private const uint SettingsCommandId = 1002;
@@ -83,7 +84,7 @@ public sealed class TrayIconService : IDisposable
             return;
         }
 
-        if (e.Message == WmRbuttonup)
+        if (e.Message is WmRbuttonup or WmContextmenu)
         {
             ShowContextMenu();
         }

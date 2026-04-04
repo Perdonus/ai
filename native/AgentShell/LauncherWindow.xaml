@@ -9,7 +9,7 @@
     <Grid Background="#010203">
         <Border
             x:Name="ShellPanel"
-            Margin="10,0"
+            Margin="0"
             Padding="10"
             Background="#0A1017"
             BorderBrush="Transparent"
@@ -42,10 +42,9 @@
                     CornerRadius="24"
                     Visibility="Collapsed">
                     <ScrollViewer
-                        x:Name="ConversationScrollViewer"
-                        MaxHeight="320"
-                        VerticalScrollBarVisibility="Auto"
-                        HorizontalScrollBarVisibility="Disabled">
+                    x:Name="ConversationScrollViewer"
+                    VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Disabled">
                         <StackPanel x:Name="ConversationPanel" Spacing="10" />
                     </ScrollViewer>
                 </Border>
