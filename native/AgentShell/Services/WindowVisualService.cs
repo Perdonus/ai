@@ -90,8 +90,8 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
         var offset = compositor.CreateVector3KeyFrameAnimation();
         offset.Duration = TimeSpan.FromMilliseconds(show ? 180 : 140);
-        offset.InsertKeyFrame(0f, show ? new System.Numerics.Vector3(72, 0, 0) : new System.Numerics.Vector3(0, 0, 0));
-        offset.InsertKeyFrame(1f, show ? new System.Numerics.Vector3(0, 0, 0) : new System.Numerics.Vector3(72, 0, 0));
+        offset.InsertKeyFrame(0f, new System.Numerics.Vector3(0, 0, 0));
+        offset.InsertKeyFrame(1f, new System.Numerics.Vector3(0, 0, 0));
 
         var opacity = compositor.CreateScalarKeyFrameAnimation();
         opacity.Duration = offset.Duration;
