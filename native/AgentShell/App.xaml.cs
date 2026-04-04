@@ -17,20 +17,29 @@ public partial class App : Application
     {
         StartupLogService.Initialize();
         StartupLogService.Info("App constructor entered.");
+        UnhandledException += App_UnhandledException;
         InitializeComponent();
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        StartupLogService.Info("OnLaunched started.");
-        ConfigService.EnsureLoaded();
-        StartupLogService.Info("Configuration loaded.");
+        try
+        {
+            StartupLogService.Info("OnLaunched started.");
+            ConfigService.EnsureLoaded();
+            StartupLogService.Info("Configuration loaded.");
 
-        Launcher = new LauncherWindow();
-        StartupLogService.Info("Launcher window created.");
-        Launcher.Activate();
-        Launcher.HideAnimated(immediate: true);
-        StartupLogService.Info("Launcher hidden immediately after activation.");
+            Launcher = new LauncherWindow();
+            StartupLogService.Info("Launcher window created.");
+            Launcher.Activate();
+            Launcher.HideAnimated(immediate: true);
+            StartupLogService.Info("Launcher hidden immediately after activation.");
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Error($"OnLaunched failed: {ex}");
+            throw;
+        }
     }
 
     public static void ShowSettings()
@@ -39,5 +48,10 @@ public partial class App : Application
         StartupLogService.Info("Settings window opened.");
         Settings.Activate();
         Settings.BringToFront();
+    }
+
+    private void App_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        StartupLogService.Error($"Application unhandled exception: {e.Exception}");
     }
 }

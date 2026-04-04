@@ -17,6 +17,12 @@ public static class Program
             StartupLogService.Error($"Unhandled exception: {eventArgs.ExceptionObject}");
         };
 
+        TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
+        {
+            StartupLogService.Error($"Unobserved task exception: {eventArgs.Exception}");
+            eventArgs.SetObserved();
+        };
+
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
             StartupLogService.Warn("ProcessExit raised.");
