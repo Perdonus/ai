@@ -305,30 +305,35 @@ public partial class MainWindow : Window
             : "--:--";
     }
 
-    private static void AnimateAutoReverse(Animatable target, DependencyProperty property, double from, double to, int milliseconds)
+    private static void AnimateAutoReverse(DependencyObject target, DependencyProperty property, double from, double to, int milliseconds)
     {
         var animation = new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(milliseconds))
         {
             AutoReverse = true,
             RepeatBehavior = RepeatBehavior.Forever
         };
-        target.BeginAnimation(property, animation);
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(animation);
+        Storyboard.SetTarget(animation, target);
+        Storyboard.SetTargetProperty(animation, new PropertyPath(property));
+        storyboard.Begin();
     }
 
-    private static void AnimateDouble(Animatable target, DependencyProperty property, double from, double to, int milliseconds)
+    private static void AnimateDouble(DependencyObject target, DependencyProperty property, double from, double to, int milliseconds)
     {
         var animation = new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(milliseconds))
         {
             FillBehavior = FillBehavior.Stop
         };
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(animation);
+        Storyboard.SetTarget(animation, target);
+        Storyboard.SetTargetProperty(animation, new PropertyPath(property));
         animation.Completed += (_, _) =>
         {
-            if (target is DependencyObject dependencyObject)
-            {
-                dependencyObject.SetValue(property, to);
-            }
+            target.SetValue(property, to);
         };
-        target.BeginAnimation(property, animation);
+        storyboard.Begin();
     }
 
     private static void PulseAndSpin(FrameworkElement element, double scale, double angle)
