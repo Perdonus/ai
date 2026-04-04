@@ -76,13 +76,13 @@ jobs:
         run: |
           if (Test-Path 'widget-release') { Remove-Item -LiteralPath 'widget-release' -Recurse -Force }
           New-Item -ItemType Directory -Force -Path 'widget-release/widgets' | Out-Null
-          Get-ChildItem widgets -Directory | ForEach-Object {
-            $manifestPath = Join-Path $_.FullName 'widget.json'
-            if (!(Test-Path $manifestPath)) { return }
-            $target = Join-Path 'widget-release/widgets' $_.Name
+          foreach ($widget in (Get-ChildItem widgets -Directory)) {
+            $manifestPath = Join-Path $widget.FullName 'widget.json'
+            if (!(Test-Path $manifestPath)) { continue }
+            $target = Join-Path 'widget-release/widgets' $widget.Name
             New-Item -ItemType Directory -Force -Path $target | Out-Null
-            robocopy $_.FullName $target /E /XD bin obj .git | Out-Null
-            if ($LASTEXITCODE -ge 8) { throw "Failed to stage widget folder $($_.Name)" }
+            robocopy $widget.FullName $target /E /XD bin obj .git | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "Failed to stage widget folder $($widget.Name)" }
           }
           Copy-Item -LiteralPath 'widgets-catalog.json' -Destination 'widget-release/widgets-catalog.json' -Force
           $builtAt = (Get-Date).ToUniversalTime().ToString('o')
