@@ -4,91 +4,65 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:automation="using:Microsoft.UI.Xaml.Automation"
     mc:Ignorable="d">
     <Grid Background="Transparent">
         <Border
             x:Name="ShellPanel"
-            Width="456"
+            Width="480"
             Padding="10"
-            Background="#0B1118"
+            Background="#0A1017"
             BorderBrush="Transparent"
             BorderThickness="0"
-            CornerRadius="28">
+            CornerRadius="30">
             <Grid RowDefinitions="Auto,Auto">
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBox
                         x:Name="PromptBox"
-                        Height="44"
+                        Height="46"
                         Padding="16,0"
+                        automation:AutomationProperties.AutomationId="PromptBox"
                         PlaceholderText="Напиши действие"
-                        FontSize="18"
-                        Background="#121A24"
+                        FontSize="17"
+                        Background="#121A25"
                         BorderBrush="Transparent"
                         BorderThickness="0"
-                        CornerRadius="22"
+                        CornerRadius="23"
                         Foreground="{StaticResource ShellTextBrush}"
                         KeyDown="PromptBox_KeyDown" />
                     <Button
                         x:Name="SettingsButton"
                         Grid.Column="1"
-                        Width="44"
-                        Height="44"
+                        Width="46"
+                        Height="46"
                         Margin="10,0,0,0"
                         Padding="0"
+                        automation:AutomationProperties.AutomationId="SettingsButton"
                         FontFamily="Segoe Fluent Icons"
-                        FontSize="14"
+                        FontSize="15"
                         Content="&#xE713;"
-                        Background="#17202C"
+                        Background="#121A25"
                         Foreground="{StaticResource ShellTextBrush}"
                         Click="SettingsButton_Click" />
                 </Grid>
 
                 <Border
-                    x:Name="OutputContainer"
+                    x:Name="ConversationContainer"
                     Grid.Row="1"
                     Margin="0,10,0,0"
-                    Padding="14"
-                    Background="#111925"
+                    Padding="8"
+                    Background="#0F1722"
                     BorderBrush="Transparent"
                     BorderThickness="0"
-                    CornerRadius="22"
+                    CornerRadius="24"
                     Visibility="Collapsed">
-                    <Grid>
-                        <ProgressRing
-                            x:Name="BusyRing"
-                            Width="18"
-                            Height="18"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Top"
-                            IsActive="False"
-                            Visibility="Collapsed"
-                            Foreground="{StaticResource ShellAccentBrush}" />
-                        <TextBlock x:Name="StatusText" Visibility="Collapsed" />
-                        <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto">
-                            <StackPanel Spacing="14">
-                                <StackPanel x:Name="ThinkingPanel" Visibility="Collapsed" Spacing="6">
-                                    <TextBlock
-                                        x:Name="ThinkingText"
-                                        TextWrapping="WrapWholeWords"
-                                        Foreground="#D1D9E5"
-                                        FontSize="13" />
-                                </StackPanel>
-                                <StackPanel x:Name="AnswerPanel" Visibility="Collapsed" Spacing="6">
-                                    <TextBlock
-                                        x:Name="AnswerText"
-                                        TextWrapping="WrapWholeWords"
-                                        Foreground="{StaticResource ShellTextBrush}"
-                                        FontSize="14" />
-                                </StackPanel>
-                                <TextBlock
-                                    x:Name="ErrorText"
-                                    Visibility="Collapsed"
-                                    TextWrapping="WrapWholeWords"
-                                    Foreground="#FF9F9F"
-                                    FontSize="13" />
-                            </StackPanel>
-                        </ScrollViewer>
-                    </Grid>
+                    <ScrollViewer
+                        x:Name="ConversationScrollViewer"
+                        MaxHeight="320"
+                        VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel x:Name="ConversationPanel" Spacing="10" />
+                    </ScrollViewer>
                 </Border>
             </Grid>
         </Border>

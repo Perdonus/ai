@@ -16,6 +16,7 @@ public sealed partial class SettingsWindow : Window
     private readonly RuntimeCatalogService _runtimeCatalog = App.RuntimeCatalog;
     private readonly IReadOnlyList<ProviderDescriptor> _providers = ProviderCatalog.All;
     private readonly DispatcherQueue _dispatcherQueue;
+    private readonly SemaphoreSlim _saveLock = new(1, 1);
     private bool _isLoading;
 
     public SettingsWindow()
@@ -180,34 +181,45 @@ public sealed partial class SettingsWindow : Window
 
     private async void SaveButton_Click(object sender, RoutedEventArgs e)
     {
-        await SaveCurrentConfigAsync($"Сохранено: {_config.NativeConfigPath}");
+        await RunUiSafeAsync(
+            () => SaveCurrentConfigAsync($"Сохранено: {_config.NativeConfigPath}"),
+            "save settings");
     }
 
     private async void BackupButton_Click(object sender, RoutedEventArgs e)
     {
-        SyncModelSettings();
-        var path = await _config.CreateBackupSnapshotAsync();
-        await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Бэкап создан: {path}");
+        await RunUiSafeAsync(async () =>
+        {
+            SyncModelSettings();
+            var path = await _config.CreateBackupSnapshotAsync();
+            await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Бэкап создан: {path}");
+        }, "backup settings");
     }
 
     private async void ExportButton_Click(object sender, RoutedEventArgs e)
     {
-        SyncModelSettings();
-        var path = await _config.ExportAsync();
-        await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Экспорт создан: {path}");
+        await RunUiSafeAsync(async () =>
+        {
+            SyncModelSettings();
+            var path = await _config.ExportAsync();
+            await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Экспорт создан: {path}");
+        }, "export settings");
     }
 
     private async void RestoreButton_Click(object sender, RoutedEventArgs e)
     {
-        var path = await _config.RestoreLatestBackupAsync();
-        if (string.IsNullOrWhiteSpace(path))
+        await RunUiSafeAsync(async () =>
         {
-            await EnqueueOnUiAsync(() => OperationStatusText.Text = "Бэкапы не найдены.");
-            return;
-        }
+            var path = await _config.RestoreLatestBackupAsync();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                await EnqueueOnUiAsync(() => OperationStatusText.Text = "Бэкапы не найдены.");
+                return;
+            }
 
-        await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Восстановлено: {path}");
-        await LoadSafeAsync();
+            await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Восстановлено: {path}");
+            await LoadSafeAsync();
+        }, "restore settings");
     }
 
     private void ProviderApiKeyBox_Loaded(object sender, RoutedEventArgs e)
@@ -243,8 +255,11 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
-        await RefreshProvidersUsingKeyAsync(providerId);
-        await SaveCurrentConfigAsync("API key updated.");
+        await RunUiSafeAsync(async () =>
+        {
+            await RefreshProvidersUsingKeyAsync(providerId);
+            await SaveCurrentConfigAsync("API key updated.");
+        }, $"provider key update {providerId}");
     }
 
     private async Task RefreshProvidersUsingKeyAsync(string providerId)
@@ -271,16 +286,24 @@ public sealed partial class SettingsWindow : Window
     }
 
     private async void PrimaryProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => await ProviderSelectionChangedAsync(PrimaryProviderCombo, PrimaryModelCombo);
+        => await RunUiSafeAsync(
+            () => ProviderSelectionChangedAsync(PrimaryProviderCombo, PrimaryModelCombo),
+            "primary provider selection");
 
     private async void AnalysisProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => await ProviderSelectionChangedAsync(AnalysisProviderCombo, AnalysisModelCombo);
+        => await RunUiSafeAsync(
+            () => ProviderSelectionChangedAsync(AnalysisProviderCombo, AnalysisModelCombo),
+            "analysis provider selection");
 
     private async void VisionProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => await ProviderSelectionChangedAsync(VisionProviderCombo, VisionModelCombo);
+        => await RunUiSafeAsync(
+            () => ProviderSelectionChangedAsync(VisionProviderCombo, VisionModelCombo),
+            "vision provider selection");
 
     private async void OcrProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => await ProviderSelectionChangedAsync(OcrProviderCombo, OcrModelCombo);
+        => await RunUiSafeAsync(
+            () => ProviderSelectionChangedAsync(OcrProviderCombo, OcrModelCombo),
+            "ocr provider selection");
 
     private async Task ProviderSelectionChangedAsync(ComboBox providerCombo, ComboBox modelCombo)
     {
@@ -304,7 +327,9 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
-        await SaveCurrentConfigAsync("Модель обновлена.");
+        await RunUiSafeAsync(
+            () => SaveCurrentConfigAsync("Модель обновлена."),
+            "model selection");
     }
 
     private async void ModelSetting_Changed(object sender, RoutedEventArgs e)
@@ -314,7 +339,9 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
-        await SaveCurrentConfigAsync("Параметр модели обновлен.");
+        await RunUiSafeAsync(
+            () => SaveCurrentConfigAsync("Параметр модели обновлен."),
+            "model toggle");
     }
 
     private async void SeparateToggle_Changed(object sender, RoutedEventArgs e)
@@ -325,7 +352,9 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
-        await SaveCurrentConfigAsync("Маршрутизация моделей обновлена.");
+        await RunUiSafeAsync(
+            () => SaveCurrentConfigAsync("Маршрутизация моделей обновлена."),
+            "separate route toggle");
     }
 
     private void ApplySeparateRouteVisibility()
@@ -337,12 +366,16 @@ public sealed partial class SettingsWindow : Window
 
     private async void RemoveTool_Click(object sender, RoutedEventArgs e)
     {
-        await RemoveRuntimeItemAsync(sender, isWidget: false);
+        await RunUiSafeAsync(
+            () => RemoveRuntimeItemAsync(sender, isWidget: false),
+            "remove tool");
     }
 
     private async void RemoveWidget_Click(object sender, RoutedEventArgs e)
     {
-        await RemoveRuntimeItemAsync(sender, isWidget: true);
+        await RunUiSafeAsync(
+            () => RemoveRuntimeItemAsync(sender, isWidget: true),
+            "remove widget");
     }
 
     private void TestWidget_Click(object sender, RoutedEventArgs e)
@@ -380,9 +413,17 @@ public sealed partial class SettingsWindow : Window
 
     private async Task SaveCurrentConfigAsync(string statusText)
     {
-        SyncModelSettings();
-        await _config.SaveAsync();
-        await EnqueueOnUiAsync(() => OperationStatusText.Text = statusText);
+        await _saveLock.WaitAsync();
+        try
+        {
+            SyncModelSettings();
+            await _config.SaveAsync();
+            await EnqueueOnUiAsync(() => OperationStatusText.Text = statusText);
+        }
+        finally
+        {
+            _saveLock.Release();
+        }
     }
 
     private void SyncModelSettings()
@@ -427,11 +468,32 @@ public sealed partial class SettingsWindow : Window
         return tcs.Task;
     }
 
+    private async Task RunUiSafeAsync(Func<Task> action, string context)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Error($"{context} failed: {ex}");
+            await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Ошибка: {ex.Message}");
+        }
+    }
+
     private void SettingsWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         args.Cancel = true;
-        SyncModelSettings();
-        _config.Save();
+        try
+        {
+            SyncModelSettings();
+            _config.Save();
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Error($"Settings close save failed: {ex}");
+        }
+
         StartupLogService.Info("Settings close intercepted, hiding instead.");
         ShowWindow(WindowNative.GetWindowHandle(this), SwHide);
     }

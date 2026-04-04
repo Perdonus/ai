@@ -11,10 +11,10 @@ namespace AgentShell.Services;
 
 public sealed class WindowVisualService(Window window, FrameworkElement animatedRoot)
 {
-    private const int CompactWidth = 456;
-    private const int CompactHeight = 76;
-    private const int ExpandedWidth = 520;
-    private const int ExpandedHeight = 340;
+    private const int CompactWidth = 500;
+    private const int CompactHeight = 72;
+    private const int ExpandedWidth = 560;
+    private const int ExpandedHeight = 430;
     private const int VisibleMargin = 18;
     private const int SwHide = 0;
     private const int SwShow = 5;
@@ -40,6 +40,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         }
 
         EnsureTaskbarWindowStyle();
+        SuppressWindowFrame();
         SetExpanded(false);
         StartupLogService.Info("Launcher chrome initialized.");
     }
@@ -149,11 +150,26 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     private void EnsureTaskbarWindowStyle()
     {
         var hwnd = WindowNative.GetWindowHandle(_window);
+        var style = GetWindowLongPtr(hwnd, GwlStyle).ToInt64();
+        style &= ~(WsCaption | WsThickframe | WsMinimizebox | WsMaximizebox | WsSysmenu);
+        _ = SetWindowLongPtr(hwnd, GwlStyle, new IntPtr(style));
+
         var exStyle = GetWindowLongPtr(hwnd, GwlExstyle).ToInt64();
         exStyle |= WsExToolwindow;
         exStyle &= ~WsExAppwindow;
         _ = SetWindowLongPtr(hwnd, GwlExstyle, new IntPtr(exStyle));
+        _ = SetWindowPos(hwnd, nint.Zero, 0, 0, 0, 0, SwpNomove | SwpNosize | SwpFramechanged);
         StartupLogService.Info($"Launcher extended window style set to 0x{exStyle:X}.");
+    }
+
+    private void SuppressWindowFrame()
+    {
+        var hwnd = WindowNative.GetWindowHandle(_window);
+        var borderColor = DwmColorNone;
+        var cornerPreference = DwmWindowCornerPreferenceRound;
+        _ = DwmSetWindowAttribute(hwnd, DwmwaBorderColor, ref borderColor, sizeof(uint));
+        _ = DwmSetWindowAttribute(hwnd, DwmwaWindowCornerPreference, ref cornerPreference, sizeof(uint));
+        StartupLogService.Info("Launcher DWM frame suppression applied.");
     }
 
     private void BringToFront()
@@ -168,11 +184,22 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         StartupLogService.Info("Launcher bring-to-front sequence executed.");
     }
 
+    private const int GwlStyle = -16;
     private const int GwlExstyle = -20;
     private const uint SwpNosize = 0x0001;
     private const uint SwpNomove = 0x0002;
+    private const uint SwpFramechanged = 0x0020;
+    private const long WsCaption = 0x00C00000L;
+    private const long WsSysmenu = 0x00080000L;
+    private const long WsThickframe = 0x00040000L;
+    private const long WsMinimizebox = 0x00020000L;
+    private const long WsMaximizebox = 0x00010000L;
     private const long WsExToolwindow = 0x00000080L;
     private const long WsExAppwindow = 0x00040000L;
+    private const uint DwmwaWindowCornerPreference = 33;
+    private const uint DwmwaBorderColor = 34;
+    private const uint DwmColorNone = 0xFFFFFFFE;
+    private const uint DwmWindowCornerPreferenceRound = 2;
     private static readonly nint HwndTopmost = new(-1);
     private static readonly nint HwndNotopmost = new(-2);
 
@@ -199,6 +226,9 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetCursorPos(out Point point);
+
+    [DllImport("dwmapi.dll", SetLastError = true)]
+    private static extern int DwmSetWindowAttribute(nint hwnd, uint dwAttribute, ref uint pvAttribute, int cbAttribute);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Point

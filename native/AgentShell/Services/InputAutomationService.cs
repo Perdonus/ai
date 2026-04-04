@@ -1,4 +1,3 @@
-using System.Text;
 using System.Runtime.InteropServices;
 
 namespace AgentShell.Services;
@@ -27,9 +26,8 @@ public sealed class InputAutomationService
 
     public void PressKey(string key)
     {
-        var vk = ResolveVirtualKey(key);
-        SendVirtualKey(vk, keyUp: false);
-        SendVirtualKey(vk, keyUp: true);
+        KeyDown(key);
+        KeyUp(key);
     }
 
     public void PressKeyCombo(IReadOnlyList<string> keys)
@@ -46,11 +44,101 @@ public sealed class InputAutomationService
         }
     }
 
-    public void LeftClick(int x, int y)
+    public void KeyDown(string key)
+    {
+        SendVirtualKey(ResolveVirtualKey(key), keyUp: false);
+    }
+
+    public void KeyUp(string key)
+    {
+        SendVirtualKey(ResolveVirtualKey(key), keyUp: true);
+    }
+
+    public async Task HoldKeyAsync(string key, int milliseconds, CancellationToken cancellationToken)
+    {
+        KeyDown(key);
+        try
+        {
+            await WaitAsync(milliseconds, cancellationToken);
+        }
+        finally
+        {
+            KeyUp(key);
+        }
+    }
+
+    public void MoveMouse(int x, int y)
     {
         _ = SetCursorPos(x, y);
-        SendMouseInput(MouseeventfLeftdown);
-        SendMouseInput(MouseeventfLeftup);
+    }
+
+    public void LeftClick(int x, int y)
+    {
+        MoveMouse(x, y);
+        Click("left");
+    }
+
+    public void RightClick(int x, int y)
+    {
+        MoveMouse(x, y);
+        Click("right");
+    }
+
+    public void DoubleClick(int x, int y, string button = "left")
+    {
+        MoveMouse(x, y);
+        Click(button);
+        Click(button);
+    }
+
+    public void Click(string button = "left")
+    {
+        MouseDown(button);
+        MouseUp(button);
+    }
+
+    public void MouseDown(string button = "left")
+    {
+        SendMouseInput(ResolveMouseDown(button));
+    }
+
+    public void MouseUp(string button = "left")
+    {
+        SendMouseInput(ResolveMouseUp(button));
+    }
+
+    public void Scroll(int delta)
+    {
+        SendMouseInput(MouseeventfWheel, unchecked((uint)delta));
+    }
+
+    public async Task DragAsync(
+        int startX,
+        int startY,
+        int endX,
+        int endY,
+        int milliseconds,
+        string button,
+        CancellationToken cancellationToken)
+    {
+        MoveMouse(startX, startY);
+        MouseDown(button);
+        try
+        {
+            var steps = Math.Clamp(milliseconds / 20, 4, 40);
+            for (var step = 1; step <= steps; step++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var x = startX + ((endX - startX) * step / steps);
+                var y = startY + ((endY - startY) * step / steps);
+                MoveMouse(x, y);
+                await WaitAsync(Math.Max(10, milliseconds / steps), cancellationToken);
+            }
+        }
+        finally
+        {
+            MouseUp(button);
+        }
     }
 
     public Task WaitAsync(int milliseconds, CancellationToken cancellationToken)
@@ -98,7 +186,7 @@ public sealed class InputAutomationService
         SendInput(1, [input], Marshal.SizeOf<Input>());
     }
 
-    private static void SendMouseInput(uint flags)
+    private static void SendMouseInput(uint flags, uint mouseData = 0)
     {
         var input = new Input
         {
@@ -107,6 +195,7 @@ public sealed class InputAutomationService
             {
                 mi = new MouseInput
                 {
+                    mouseData = mouseData,
                     dwFlags = flags,
                     dwExtraInfo = nint.Zero
                 }
@@ -114,6 +203,26 @@ public sealed class InputAutomationService
         };
 
         SendInput(1, [input], Marshal.SizeOf<Input>());
+    }
+
+    private static uint ResolveMouseDown(string button)
+    {
+        return button.Trim().ToLowerInvariant() switch
+        {
+            "left" => MouseeventfLeftdown,
+            "right" => MouseeventfRightdown,
+            _ => throw new InvalidOperationException($"Unsupported mouse button: {button}")
+        };
+    }
+
+    private static uint ResolveMouseUp(string button)
+    {
+        return button.Trim().ToLowerInvariant() switch
+        {
+            "left" => MouseeventfLeftup,
+            "right" => MouseeventfRightup,
+            _ => throw new InvalidOperationException($"Unsupported mouse button: {button}")
+        };
     }
 
     private static ushort ResolveVirtualKey(string key)
@@ -128,12 +237,29 @@ public sealed class InputAutomationService
             "DOWN" => 0x28,
             "LEFT" => 0x25,
             "RIGHT" => 0x27,
+            "HOME" => 0x24,
+            "END" => 0x23,
+            "PAGEUP" => 0x21,
+            "PAGEDOWN" => 0x22,
             "CTRL" or "CONTROL" => 0x11,
             "SHIFT" => 0x10,
             "ALT" => 0x12,
             "WIN" or "WINDOWS" => 0x5B,
             "BACKSPACE" => 0x08,
             "DELETE" => 0x2E,
+            "INSERT" => 0x2D,
+            "F1" => 0x70,
+            "F2" => 0x71,
+            "F3" => 0x72,
+            "F4" => 0x73,
+            "F5" => 0x74,
+            "F6" => 0x75,
+            "F7" => 0x76,
+            "F8" => 0x77,
+            "F9" => 0x78,
+            "F10" => 0x79,
+            "F11" => 0x7A,
+            "F12" => 0x7B,
             var single when single.Length == 1 => (ushort)single[0],
             _ => throw new InvalidOperationException($"Unsupported key: {key}")
         };
@@ -145,6 +271,9 @@ public sealed class InputAutomationService
     private const uint KeyeventfUnicode = 0x0004;
     private const uint MouseeventfLeftdown = 0x0002;
     private const uint MouseeventfLeftup = 0x0004;
+    private const uint MouseeventfRightdown = 0x0008;
+    private const uint MouseeventfRightup = 0x0010;
+    private const uint MouseeventfWheel = 0x0800;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Input

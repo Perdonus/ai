@@ -1,20 +1,35 @@
 using System.Runtime.InteropServices;
 using AgentShell.Services;
+using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using WinRT.Interop;
 
 namespace AgentShell;
 
 public sealed partial class LauncherWindow : Window
 {
+    private static readonly SolidColorBrush PromptBrush = Brush(0xFF, 0xF5, 0xFB, 0xFF);
+    private static readonly SolidColorBrush SubtleBrush = Brush(0xFF, 0xB7, 0xC4, 0xD6);
+    private static readonly SolidColorBrush TimerBrush = Brush(0xFF, 0x7E, 0x91, 0xA9);
+    private static readonly SolidColorBrush TurnBrush = Brush(0xFF, 0x10, 0x18, 0x24);
+    private static readonly SolidColorBrush TurnHeaderBrush = Brush(0xFF, 0x15, 0x1F, 0x2D);
+    private static readonly SolidColorBrush TurnDetailsBrush = Brush(0xFF, 0x0D, 0x15, 0x20);
+    private static readonly SolidColorBrush TurnAnswerBrush = Brush(0xFF, 0x12, 0x1C, 0x29);
+    private static readonly SolidColorBrush TurnErrorBrush = Brush(0xFF, 0x36, 0x15, 0x17);
+    private static readonly SolidColorBrush TurnErrorTextBrush = Brush(0xFF, 0xFF, 0xAA, 0xAA);
+
     private readonly AgentLoopService _agentLoop = new();
     private readonly GlobalHotkeyService _hotkey;
     private readonly WindowVisualService _visuals;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly AgentSessionState _session = new();
+    private readonly DispatcherTimer _turnTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly List<ConversationTurnView> _turns = [];
     private CancellationTokenSource? _promptCts;
     private bool _isBusy;
     private bool _isVisible;
@@ -29,6 +44,7 @@ public sealed partial class LauncherWindow : Window
             InitializeComponent();
             StartupLogService.Info("LauncherWindow initialized.");
             _dispatcherQueue = DispatcherQueue;
+            _turnTimer.Tick += TurnTimer_Tick;
 
             _visuals = new WindowVisualService(this, ShellPanel);
             _visuals.InitializeLauncherChrome();
@@ -141,7 +157,6 @@ public sealed partial class LauncherWindow : Window
             if (_isBusy)
             {
                 _promptCts?.Cancel();
-                SetStatus("Cancelled");
             }
             else
             {
@@ -178,85 +193,37 @@ public sealed partial class LauncherWindow : Window
         _promptCts = new CancellationTokenSource();
         _isBusy = true;
 
-        await EnqueueOnUiAsync(() =>
-        {
-            BusyRing.IsActive = true;
-            BusyRing.Visibility = Visibility.Visible;
-            OutputContainer.Visibility = Visibility.Visible;
-            ThinkingPanel.Visibility = Visibility.Visible;
-            ThinkingText.Text = "Думаю...";
-            AnswerPanel.Visibility = Visibility.Collapsed;
-            ErrorText.Visibility = Visibility.Collapsed;
-            ErrorText.Text = string.Empty;
-            ApplyExpandedState(true);
-            SetStatus("Агент работает...");
-        });
+        PromptBox.Text = string.Empty;
+        var turn = CreateConversationTurn(prompt);
+        SetTurnBusy(turn);
+        ApplyExpandedState(true);
 
         var progress = new Progress<AgentLoopProgress>(update =>
         {
             _ = EnqueueOnUiAsync(() =>
             {
-                OutputContainer.Visibility = Visibility.Visible;
-                ApplyExpandedState(true);
-                SetStatus(update.Status);
-
-                if (!string.IsNullOrWhiteSpace(update.Thinking))
-                {
-                    ThinkingText.Text = update.Thinking;
-                    ThinkingPanel.Visibility = Visibility.Visible;
-                }
-
-                if (!string.IsNullOrWhiteSpace(update.Answer))
-                {
-                    AnswerText.Text = update.Answer;
-                    AnswerPanel.Visibility = Visibility.Visible;
-                }
+                UpdateTurnProgress(turn, update);
             });
         });
 
         try
         {
             var result = await _agentLoop.RunAsync(App.ConfigService.Current, _session, prompt, progress, _promptCts.Token);
-            await EnqueueOnUiAsync(() =>
-            {
-                if (!string.IsNullOrWhiteSpace(result.Error))
-                {
-                    ErrorText.Text = result.Error;
-                    ErrorText.Visibility = Visibility.Visible;
-                    SetStatus("Ошибка");
-                    return;
-                }
-
-                ThinkingText.Text = result.Thinking;
-                ThinkingPanel.Visibility = string.IsNullOrWhiteSpace(result.Thinking) ? Visibility.Collapsed : Visibility.Visible;
-                AnswerText.Text = result.Answer;
-                AnswerPanel.Visibility = string.IsNullOrWhiteSpace(result.Answer) ? Visibility.Collapsed : Visibility.Visible;
-                SetStatus("Готово");
-            });
+            await EnqueueOnUiAsync(() => CompleteTurn(turn, result));
         }
         catch (OperationCanceledException)
         {
-            await EnqueueOnUiAsync(() => SetStatus("Cancelled"));
+            await EnqueueOnUiAsync(() => CancelTurn(turn));
         }
         catch (Exception ex)
         {
             StartupLogService.Error($"Prompt execution failed: {ex}");
-            await EnqueueOnUiAsync(() =>
-            {
-                ErrorText.Text = ex.Message;
-                ErrorText.Visibility = Visibility.Visible;
-                SetStatus("Ошибка");
-            });
+            await EnqueueOnUiAsync(() => FailTurn(turn, ex.Message));
         }
         finally
         {
             _isBusy = false;
-            await EnqueueOnUiAsync(() =>
-            {
-                BusyRing.IsActive = false;
-                BusyRing.Visibility = Visibility.Collapsed;
-            });
-
+            await EnqueueOnUiAsync(StopTurnTimerIfIdle);
             await FocusPromptAsync();
         }
     }
@@ -280,7 +247,7 @@ public sealed partial class LauncherWindow : Window
     private void ApplyExpandedState(bool expanded)
     {
         _visuals.SetExpanded(expanded);
-        OutputContainer.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
+        ConversationContainer.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
         if (_isVisible)
         {
             _visuals.MoveTopRight();
@@ -289,7 +256,7 @@ public sealed partial class LauncherWindow : Window
 
     private async Task FocusPromptAsync()
     {
-        for (var attempt = 0; attempt < 3; attempt++)
+        for (var attempt = 0; attempt < 4; attempt++)
         {
             await EnqueueOnUiAsync(() =>
             {
@@ -297,41 +264,342 @@ public sealed partial class LauncherWindow : Window
                 var hwnd = WindowNative.GetWindowHandle(this);
                 _ = ShowWindow(hwnd, SwShow);
                 _ = SetForegroundWindow(hwnd);
-                PromptBox.Focus(FocusState.Programmatic);
+                PromptBox.Focus(FocusState.Keyboard);
                 if (!string.IsNullOrWhiteSpace(PromptBox.Text))
                 {
                     PromptBox.SelectAll();
                 }
             });
 
-            await Task.Delay(70);
+            await Task.Delay(attempt == 0 ? 25 : 70);
         }
     }
 
     private bool HasConversationContent()
     {
-        return !string.IsNullOrWhiteSpace(ThinkingText.Text) ||
-               !string.IsNullOrWhiteSpace(AnswerText.Text) ||
-               !string.IsNullOrWhiteSpace(ErrorText.Text);
+        return _turns.Count > 0;
+    }
+
+    private ConversationTurnView CreateConversationTurn(string prompt)
+    {
+        ConversationContainer.Visibility = Visibility.Visible;
+
+        var promptText = new TextBlock
+        {
+            Text = prompt,
+            Foreground = PromptBrush,
+            FontSize = 14,
+            TextWrapping = TextWrapping.WrapWholeWords
+        };
+
+        var spinner = new ProgressRing
+        {
+            Width = 14,
+            Height = 14,
+            IsActive = true,
+            Foreground = (Brush)Application.Current.Resources["ShellAccentBrush"],
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        var summaryText = new TextBlock
+        {
+            Text = "Думаю...",
+            Foreground = SubtleBrush,
+            FontSize = 13.5,
+            TextWrapping = TextWrapping.NoWrap,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        var elapsedText = new TextBlock
+        {
+            Text = "0с",
+            Foreground = TimerBrush,
+            FontSize = 12.5,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+
+        ConversationTurnView? turn = null;
+
+        var headerButton = new Button
+        {
+            Background = TurnHeaderBrush,
+            BorderBrush = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(10, 8, 10, 8),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch
+        };
+        headerButton.Click += (_, _) =>
+        {
+            if (turn is not null)
+            {
+                ToggleTurnDetails(turn);
+            }
+        };
+
+        var headerGrid = new Grid();
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        spinner.Margin = new Thickness(0, 0, 8, 0);
+        Grid.SetColumn(spinner, 0);
+        Grid.SetColumn(summaryText, 1);
+        Grid.SetColumn(elapsedText, 2);
+        headerGrid.Children.Add(spinner);
+        headerGrid.Children.Add(summaryText);
+        headerGrid.Children.Add(elapsedText);
+        headerButton.Content = headerGrid;
+
+        var detailsText = new TextBlock
+        {
+            Foreground = SubtleBrush,
+            FontSize = 13,
+            TextWrapping = TextWrapping.WrapWholeWords
+        };
+
+        var detailsBorder = new Border
+        {
+            Background = TurnDetailsBrush,
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(12),
+            Visibility = Visibility.Collapsed,
+            Child = detailsText
+        };
+
+        var answerText = new TextBlock
+        {
+            Foreground = PromptBrush,
+            FontSize = 14,
+            TextWrapping = TextWrapping.WrapWholeWords
+        };
+
+        var answerBorder = new Border
+        {
+            Background = TurnAnswerBrush,
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(12),
+            Visibility = Visibility.Collapsed,
+            Child = answerText
+        };
+
+        var errorText = new TextBlock
+        {
+            Foreground = TurnErrorTextBrush,
+            FontSize = 13,
+            TextWrapping = TextWrapping.WrapWholeWords
+        };
+
+        var errorBorder = new Border
+        {
+            Background = TurnErrorBrush,
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(12),
+            Visibility = Visibility.Collapsed,
+            Child = errorText
+        };
+
+        var stack = new StackPanel { Spacing = 8 };
+        stack.Children.Add(promptText);
+        stack.Children.Add(headerButton);
+        stack.Children.Add(detailsBorder);
+        stack.Children.Add(answerBorder);
+        stack.Children.Add(errorBorder);
+
+        var root = new Border
+        {
+            Background = TurnBrush,
+            CornerRadius = new CornerRadius(20),
+            Padding = new Thickness(12),
+            Child = stack
+        };
+
+        turn = new ConversationTurnView(
+            prompt,
+            DateTimeOffset.Now,
+            root,
+            spinner,
+            summaryText,
+            elapsedText,
+            detailsBorder,
+            detailsText,
+            answerBorder,
+            answerText,
+            errorBorder,
+            errorText);
+
+        _turns.Add(turn);
+        ConversationPanel.Children.Add(root);
+        UpdateElapsedText(turn);
+        ScrollConversationToEnd();
+        return turn;
+    }
+
+    private void SetTurnBusy(ConversationTurnView turn)
+    {
+        turn.IsBusy = true;
+        turn.SummaryText.Text = "Думаю...";
+        turn.Spinner.Visibility = Visibility.Visible;
+        turn.Spinner.IsActive = true;
+        UpdateElapsedText(turn);
+        _turnTimer.Start();
+    }
+
+    private void UpdateTurnProgress(ConversationTurnView turn, AgentLoopProgress update)
+    {
+        turn.SummaryText.Text = "Думаю...";
+        var details = BuildDetailsText(update.Status, update.Thinking);
+        turn.DetailsText.Text = details;
+        RefreshTurnDetailsVisibility(turn);
+
+        if (!string.IsNullOrWhiteSpace(update.Answer))
+        {
+            turn.AnswerText.Text = update.Answer;
+            turn.AnswerBorder.Visibility = Visibility.Visible;
+        }
+
+        UpdateElapsedText(turn);
+        ScrollConversationToEnd();
+    }
+
+    private void CompleteTurn(ConversationTurnView turn, AgentLoopResult result)
+    {
+        turn.IsBusy = false;
+        turn.Spinner.IsActive = false;
+        turn.Spinner.Visibility = Visibility.Collapsed;
+        UpdateElapsedText(turn);
+
+        if (!string.IsNullOrWhiteSpace(result.Thinking))
+        {
+            turn.DetailsText.Text = result.Thinking;
+        }
+
+        RefreshTurnDetailsVisibility(turn);
+
+        if (!string.IsNullOrWhiteSpace(result.Error))
+        {
+            turn.SummaryText.Text = "Ошибка";
+            turn.ErrorText.Text = result.Error;
+            turn.ErrorBorder.Visibility = Visibility.Visible;
+            turn.AnswerBorder.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            turn.ErrorText.Text = string.Empty;
+            turn.ErrorBorder.Visibility = Visibility.Collapsed;
+            turn.SummaryText.Text = result.WaitingForUser ? "Жду данные" : "Что думала и делала";
+
+            if (!string.IsNullOrWhiteSpace(result.Answer))
+            {
+                turn.AnswerText.Text = result.Answer;
+                turn.AnswerBorder.Visibility = Visibility.Visible;
+            }
+        }
+
+        StopTurnTimerIfIdle();
+        ScrollConversationToEnd();
+    }
+
+    private void CancelTurn(ConversationTurnView turn)
+    {
+        turn.IsBusy = false;
+        turn.Spinner.IsActive = false;
+        turn.Spinner.Visibility = Visibility.Collapsed;
+        turn.SummaryText.Text = "Остановлено";
+        if (string.IsNullOrWhiteSpace(turn.AnswerText.Text))
+        {
+            turn.AnswerText.Text = "Остановилась.";
+            turn.AnswerBorder.Visibility = Visibility.Visible;
+        }
+
+        UpdateElapsedText(turn);
+        StopTurnTimerIfIdle();
+    }
+
+    private void FailTurn(ConversationTurnView turn, string error)
+    {
+        turn.IsBusy = false;
+        turn.Spinner.IsActive = false;
+        turn.Spinner.Visibility = Visibility.Collapsed;
+        turn.SummaryText.Text = "Ошибка";
+        turn.ErrorText.Text = error;
+        turn.ErrorBorder.Visibility = Visibility.Visible;
+        UpdateElapsedText(turn);
+        StopTurnTimerIfIdle();
+    }
+
+    private void ToggleTurnDetails(ConversationTurnView turn)
+    {
+        turn.DetailsExpanded = !turn.DetailsExpanded;
+        RefreshTurnDetailsVisibility(turn);
+    }
+
+    private void RefreshTurnDetailsVisibility(ConversationTurnView turn)
+    {
+        var hasDetails = !string.IsNullOrWhiteSpace(turn.DetailsText.Text);
+        turn.DetailsBorder.Visibility = hasDetails && turn.DetailsExpanded
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void TurnTimer_Tick(object? sender, object e)
+    {
+        foreach (var turn in _turns.Where(item => item.IsBusy))
+        {
+            UpdateElapsedText(turn);
+        }
+    }
+
+    private void UpdateElapsedText(ConversationTurnView turn)
+    {
+        var elapsed = DateTimeOffset.Now - turn.StartedAt;
+        turn.ElapsedText.Text = elapsed.TotalMinutes >= 1
+            ? $"{Math.Max(1, (int)elapsed.TotalMinutes)}м"
+            : $"{Math.Max(1, (int)elapsed.TotalSeconds)}с";
+    }
+
+    private void StopTurnTimerIfIdle()
+    {
+        if (_turns.All(item => !item.IsBusy))
+        {
+            _turnTimer.Stop();
+        }
+    }
+
+    private void ScrollConversationToEnd()
+    {
+        ConversationScrollViewer.UpdateLayout();
+        ConversationScrollViewer.ChangeView(null, ConversationScrollViewer.ScrollableHeight, null, true);
     }
 
     private void ResetSessionUi()
     {
-        BusyRing.IsActive = false;
-        BusyRing.Visibility = Visibility.Collapsed;
-        SetStatus(string.Empty);
-        ThinkingText.Text = string.Empty;
-        AnswerText.Text = string.Empty;
-        ErrorText.Text = string.Empty;
-        ThinkingPanel.Visibility = Visibility.Collapsed;
-        AnswerPanel.Visibility = Visibility.Collapsed;
-        ErrorText.Visibility = Visibility.Collapsed;
+        _turnTimer.Stop();
+        _turns.Clear();
+        ConversationPanel.Children.Clear();
+        ConversationContainer.Visibility = Visibility.Collapsed;
         ApplyExpandedState(false);
     }
 
-    private void SetStatus(string text)
+    private static string BuildDetailsText(string status, string thinking)
     {
-        StatusText.Text = text;
+        if (string.IsNullOrWhiteSpace(status) && string.IsNullOrWhiteSpace(thinking))
+        {
+            return string.Empty;
+        }
+
+        if (string.IsNullOrWhiteSpace(thinking))
+        {
+            return $"Сейчас: {status}";
+        }
+
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return thinking.Trim();
+        }
+
+        return $"Сейчас: {status}{Environment.NewLine}{Environment.NewLine}{thinking.Trim()}";
     }
 
     private Task EnqueueOnUiAsync(Action action)
@@ -368,6 +636,11 @@ public sealed partial class LauncherWindow : Window
         return AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowNative.GetWindowHandle(this)));
     }
 
+    private static SolidColorBrush Brush(byte a, byte r, byte g, byte b)
+    {
+        return new(ColorHelper.FromArgb(a, r, g, b));
+    }
+
     private const int SwShow = 5;
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -375,4 +648,34 @@ public sealed partial class LauncherWindow : Window
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetForegroundWindow(nint hWnd);
+
+    private sealed class ConversationTurnView(
+        string prompt,
+        DateTimeOffset startedAt,
+        Border root,
+        ProgressRing spinner,
+        TextBlock summaryText,
+        TextBlock elapsedText,
+        Border detailsBorder,
+        TextBlock detailsText,
+        Border answerBorder,
+        TextBlock answerText,
+        Border errorBorder,
+        TextBlock errorText)
+    {
+        public string Prompt { get; } = prompt;
+        public DateTimeOffset StartedAt { get; } = startedAt;
+        public Border Root { get; } = root;
+        public ProgressRing Spinner { get; } = spinner;
+        public TextBlock SummaryText { get; } = summaryText;
+        public TextBlock ElapsedText { get; } = elapsedText;
+        public Border DetailsBorder { get; } = detailsBorder;
+        public TextBlock DetailsText { get; } = detailsText;
+        public Border AnswerBorder { get; } = answerBorder;
+        public TextBlock AnswerText { get; } = answerText;
+        public Border ErrorBorder { get; } = errorBorder;
+        public TextBlock ErrorText { get; } = errorText;
+        public bool DetailsExpanded { get; set; }
+        public bool IsBusy { get; set; }
+    }
 }
