@@ -5,7 +5,9 @@
     xmlns:controls="using:Microsoft.UI.Xaml.Controls">
     <Application.Resources>
         <ResourceDictionary>
-            <controls:XamlControlsResources />
+            <ResourceDictionary.MergedDictionaries>
+                <controls:XamlControlsResources />
+            </ResourceDictionary.MergedDictionaries>
             <Color x:Key="ShellAccentColor">#FF90F0D0</Color>
             <Color x:Key="ShellPanelColor">#FF0E141D</Color>
             <Color x:Key="ShellPanelEdgeColor">#FF1E2938</Color>
