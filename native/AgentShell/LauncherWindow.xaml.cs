@@ -8,7 +8,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using WinRT.Interop;
-using Windows.System;
 
 namespace AgentShell;
 
@@ -146,14 +145,14 @@ public sealed partial class LauncherWindow : Window
 
     private void PromptBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key == VirtualKey.Enter)
+        if (e.Key == Windows.System.VirtualKey.Enter)
         {
             e.Handled = true;
             _ = SubmitPromptAsync();
             return;
         }
 
-        if (e.Key == VirtualKey.Escape)
+        if (e.Key == Windows.System.VirtualKey.Escape)
         {
             if (_isBusy)
             {
