@@ -17,6 +17,8 @@ public sealed class AgentLoopService
     private readonly DesktopContextService _context = new();
     private readonly ClipboardService _clipboard = new();
     private readonly RuntimeToolService _runtimeTools = new();
+    private readonly TesseractOcrService _ocr = new();
+    private readonly McpThinkingService _mcpThinking = new();
 
     public async Task<AgentLoopResult> RunAsync(
         ShellConfig config,
@@ -40,7 +42,7 @@ public sealed class AgentLoopService
             var directResult = await _desktop.TryHandleAsync(prompt, cancellationToken);
             if (directResult is not null)
             {
-                AppendThought(visibleThoughts, 1, $"Локально распознала прямую команду: {directResult.Message}");
+                AppendThought(visibleThoughts, $"Локально распознала прямую команду: {directResult.Message}");
                 session.History.Add($"Ассистент: {directResult.Message}");
                 return new AgentLoopResult(visibleThoughts.ToString(), directResult.Message, string.Empty, false);
             }
@@ -49,49 +51,44 @@ public sealed class AgentLoopService
         for (var step = 1; step <= MaxSteps; step++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            progress?.Report(new AgentLoopProgress($"Шаг {step}: смотрю на экран", visibleThoughts.ToString(), finalAnswer));
+            progress?.Report(new AgentLoopProgress("Смотрю на экран", visibleThoughts.ToString(), finalAnswer));
 
             var snapshot = _screen.Capture();
             var context = _context.Capture();
             var clipboardPreview = _clipboard.GetPreview();
             var ocrText = string.Empty;
+            var mcpSupplement = string.Empty;
 
             string analysis = string.Empty;
             var analysisRoute = _chat.ResolveAnalysisRoute(config);
-            var ocrRoute = _chat.ResolveOcrRoute(config);
             try
             {
-                if (ShouldRunSeparateOcr(config, ocrRoute))
+                try
                 {
-                    if (_chat.CanLikelyUseImages(ocrRoute!))
-                    {
-                        progress?.Report(new AgentLoopProgress($"Шаг {step}: читаю текст на экране", visibleThoughts.ToString(), finalAnswer));
-                        try
-                        {
-                            ocrText = await _chat.RequestTextAsync(
-                                config,
-                                ocrRoute!,
-                                "Ты OCR-модель desktop-агента Windows. Аккуратно распознай текст, который реально виден на скриншоте. Верни только полезный текст без комментариев, без JSON и без объяснений.",
-                                BuildOcrPrompt(prompt, step, context),
-                                cancellationToken,
-                                snapshot);
-                            ocrText = NormalizeOcrText(ocrText);
-                        }
-                        catch (Exception ex) when (LooksLikeImageCapabilityFailure(ex))
-                        {
-                            StartupLogService.Warn($"Skipping OCR image request for {ocrRoute.Provider}/{ocrRoute.Model}: {ex.Message}");
-                            ocrText = string.Empty;
-                        }
-                    }
-                    else
-                    {
-                        StartupLogService.Warn($"Skipping OCR route {ocrRoute.Provider}/{ocrRoute.Model} because it does not look image-capable.");
-                    }
+                    progress?.Report(new AgentLoopProgress("Читаю текст на экране", visibleThoughts.ToString(), finalAnswer));
+                    ocrText = NormalizeOcrText(await _ocr.RecognizeAsync(snapshot, cancellationToken));
+                }
+                catch (Exception ex)
+                {
+                    StartupLogService.Warn($"Tesseract OCR failed: {ex.Message}");
+                    ocrText = string.Empty;
+                }
+
+                if (config.Models.PrimaryMcpThinking || config.Models.AnalysisMcpThinking)
+                {
+                    mcpSupplement = _mcpThinking.BuildSupplement(prompt, step, context, clipboardPreview, ocrText, runtimeTools);
                 }
 
                 if (ShouldRunSeparateAnalysis(config, analysisRoute, step))
                 {
-                    var analysisPrompt = BuildAnalysisPrompt(session, prompt, step, context, clipboardPreview, ocrText);
+                    var analysisPrompt = BuildAnalysisPrompt(
+                        session,
+                        prompt,
+                        step,
+                        context,
+                        clipboardPreview,
+                        ocrText,
+                        config.Models.AnalysisMcpThinking ? mcpSupplement : string.Empty);
                     analysis = await _chat.RequestTextAsync(
                         config,
                         analysisRoute!,
@@ -101,8 +98,8 @@ public sealed class AgentLoopService
 
                     if (_chat.ShouldShowAnalysisThinking(config))
                     {
-                        AppendThought(visibleThoughts, step, analysis);
-                        progress?.Report(new AgentLoopProgress($"Шаг {step}: анализ", visibleThoughts.ToString(), finalAnswer));
+                        AppendThought(visibleThoughts, analysis);
+                        progress?.Report(new AgentLoopProgress("Планирую следующий ход", visibleThoughts.ToString(), finalAnswer));
                     }
                 }
 
@@ -116,6 +113,7 @@ public sealed class AgentLoopService
                     clipboardPreview,
                     ocrText,
                     analysis,
+                    config.Models.PrimaryMcpThinking ? mcpSupplement : string.Empty,
                     toolPrompt,
                     cancellationToken);
 
@@ -124,8 +122,8 @@ public sealed class AgentLoopService
 
                 if (_chat.ShouldShowPrimaryThinking(config) && !string.IsNullOrWhiteSpace(decision.Thought))
                 {
-                    AppendThought(visibleThoughts, step, decision.Thought);
-                    progress?.Report(new AgentLoopProgress($"Шаг {step}: думаю", visibleThoughts.ToString(), finalAnswer));
+                    AppendThought(visibleThoughts, decision.Thought);
+                    progress?.Report(new AgentLoopProgress(string.IsNullOrWhiteSpace(decision.Thought) ? "Думаю" : decision.Thought, visibleThoughts.ToString(), finalAnswer));
                 }
 
                 if (decision.Action.Type == "await_user")
@@ -155,13 +153,13 @@ public sealed class AgentLoopService
                 }
 
                 var actionSummary = await ExecuteActionAsync(decision.Action, snapshot, cancellationToken);
-                session.History.Add($"Шаг {step}: {decision.Thought}");
-                session.History.Add($"Действие {step}: {actionSummary}");
+                session.History.Add($"Мысль: {decision.Thought}");
+                session.History.Add($"Сделано: {actionSummary}");
 
                 if (!string.IsNullOrWhiteSpace(actionSummary))
                 {
-                    AppendThought(visibleThoughts, step, $"Действие: {actionSummary}");
-                    progress?.Report(new AgentLoopProgress($"Шаг {step}: действие", visibleThoughts.ToString(), finalAnswer));
+                    AppendThought(visibleThoughts, $"Сделала: {actionSummary}");
+                    progress?.Report(new AgentLoopProgress(actionSummary, visibleThoughts.ToString(), finalAnswer));
                 }
 
                 if (simpleOpenRequest &&
@@ -200,9 +198,9 @@ public sealed class AgentLoopService
             catch (ProviderRateLimitException ex)
             {
                 finalAnswer = $"Уперлась в лимит провайдера {ex.ProviderKey}. Я остановилась и не стала спамить запросы. Подожди примерно {Math.Max(1, (int)Math.Ceiling(ex.RetryAfter.TotalSeconds))} с и повтори запрос.";
-                AppendThought(visibleThoughts, step, finalAnswer);
+                AppendThought(visibleThoughts, finalAnswer);
                 session.History.Add($"Ассистент: {finalAnswer}");
-                progress?.Report(new AgentLoopProgress($"Шаг {step}: пауза из-за rate limit", visibleThoughts.ToString(), finalAnswer));
+                progress?.Report(new AgentLoopProgress("Пауза из-за лимита провайдера", visibleThoughts.ToString(), finalAnswer));
                 return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
             }
 
@@ -224,11 +222,12 @@ public sealed class AgentLoopService
         string clipboardPreview,
         string ocrText,
         string analysis,
+        string mcpThinking,
         string toolPrompt,
         CancellationToken cancellationToken)
     {
         var route = _chat.ResolveVisionRoute(config);
-        var systemPrompt = BuildDecisionSystemPrompt(toolPrompt);
+        var systemPrompt = BuildDecisionSystemPrompt(toolPrompt, !string.IsNullOrWhiteSpace(mcpThinking));
         var withScreenshotPrompt = BuildDecisionUserPrompt(
             session,
             prompt,
@@ -238,6 +237,7 @@ public sealed class AgentLoopService
             clipboardPreview,
             ocrText,
             analysis,
+            mcpThinking,
             screenshotAttached: true);
 
         if (_chat.CanLikelyUseImages(route))
@@ -266,6 +266,7 @@ public sealed class AgentLoopService
             clipboardPreview,
             ocrText,
             analysis,
+            mcpThinking,
             screenshotAttached: false);
 
         var fallbackJson = await _chat.RequestJsonAsync(config, route, systemPrompt, textOnlyPrompt, null, cancellationToken);
@@ -412,7 +413,8 @@ public sealed class AgentLoopService
         int step,
         DesktopContextSnapshot context,
         string clipboardPreview,
-        string ocrText)
+        string ocrText,
+        string mcpThinking)
     {
         return $"""
 Текущий запрос пользователя: {prompt}
@@ -426,36 +428,29 @@ Desktop context:
 OCR со скриншота:
 {FormatSupplement(ocrText)}
 
+MCP thinking:
+{FormatSupplement(mcpThinking)}
+
 Дай краткую мысль о следующем одном шаге.
 """;
     }
 
-    private static string BuildOcrPrompt(
-        string prompt,
-        int step,
-        DesktopContextSnapshot context)
+    private static string BuildDecisionSystemPrompt(string toolPrompt, bool mcpThinkingEnabled)
     {
-        return $"""
-Текущий запрос пользователя: {prompt}
-Номер шага: {step}
+        var mcpRule = mcpThinkingEnabled
+            ? "Для этого шага включен MCP thinking overlay: используй его как дополнительную локальную схему планирования, но наружу всё равно отвечай только JSON."
+            : string.Empty;
 
-Desktop context:
-{context.ToPromptString("буфер не запрашивался")}
-
-Считай и верни важный видимый текст со скриншота.
-""";
-    }
-
-    private static string BuildDecisionSystemPrompt(string toolPrompt)
-    {
         return $$"""
 Ты не текстовый чат-бот. Ты desktop-агент на Windows, который реально управляет ПК.
 Ты видишь экран, анализируешь контекст, помнишь текущую сессию и делаешь действия руками: мышью, клавиатурой, буфером обмена, запуском приложений, открытием файлов, сайтов и runtime-тулзов.
 Все твои действия должны быть визуальными и пошаговыми: сначала оцени состояние, потом сделай один шаг, потом снова оцени.
-Если пользователь просит что-то написать, стереть, выделить, вставить, нарисовать, открыть, перетащить, прокрутить или заполнить, делай это через действия ввода и навигации.
+Если пользователь просит что-то написать, стереть, выделить, вставить, нарисовать, открыть, перетащить, прокрутить, заменить, очистить или заполнить, делай это через действия ввода и навигации.
 Если тебе не хватает обязательных данных от пользователя, не зацикливайся. Используй await_user и остановись до следующего сообщения пользователя.
 Если нужны логин, пароль, код, captcha, подтверждение, выбор пользователя или другие данные, которые нельзя додумать, используй await_user сразу и не повторяй одинаковые шаги.
 Если внешний сервис начал ограничивать запросы или не отвечает, не спамь повтором. Остановись с понятным статусом.
+Ты важный системный агент, а не обычная чат-модель. Если задачу нужно делать на ПК руками, действуй, а не объясняй словами.
+{{mcpRule}}
 Отвечай строго JSON-объектом без markdown, комментариев и лишнего текста.
 
 Формат:
@@ -518,6 +513,7 @@ Desktop context:
         string clipboardPreview,
         string ocrText,
         string analysis,
+        string mcpThinking,
         bool screenshotAttached)
     {
         var history = string.Join("\n", session.History.TakeLast(12));
@@ -538,6 +534,9 @@ OCR со скриншота:
 
 Дополнительный анализ:
 {FormatSupplement(analysis)}
+
+MCP thinking:
+{FormatSupplement(mcpThinking)}
 
 Выбери ОДИН следующий шаг.
 """;
@@ -606,16 +605,6 @@ OCR со скриншота:
         }
 
         return step == 1 || step % 3 == 0;
-    }
-
-    private static bool ShouldRunSeparateOcr(ShellConfig config, ModelRoute? ocrRoute)
-    {
-        if (!config.Models.UseSeparateOcr || ocrRoute is null)
-        {
-            return false;
-        }
-
-        return !RoutesEqual(ocrRoute, config.Models.Primary);
     }
 
     private static bool RoutesEqual(ModelRoute left, ModelRoute right)
@@ -948,7 +937,7 @@ OCR со скриншота:
         return singleLine.Length <= 220 ? singleLine : $"{singleLine[..220]}...";
     }
 
-    private static void AppendThought(StringBuilder builder, int step, string line)
+    private static void AppendThought(StringBuilder builder, string line)
     {
         if (string.IsNullOrWhiteSpace(line))
         {
@@ -960,7 +949,7 @@ OCR со скриншота:
             builder.AppendLine().AppendLine();
         }
 
-        builder.Append($"Шаг {step}. {line.Trim()}");
+        builder.Append(line.Trim());
     }
 
     private static string NormalizeOcrText(string value)

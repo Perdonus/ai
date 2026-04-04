@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Documents;
 using WinRT.Interop;
 
 namespace AgentShell;
@@ -355,11 +356,11 @@ public sealed partial class LauncherWindow : Window
 
         var headerButton = new Button
         {
-            Background = TurnHeaderBrush,
+            Background = new SolidColorBrush(Colors.Transparent),
             BorderBrush = new SolidColorBrush(Colors.Transparent),
             BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(10, 8, 10, 8),
+            Padding = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch
         };
@@ -384,11 +385,10 @@ public sealed partial class LauncherWindow : Window
         headerGrid.Children.Add(elapsedText);
         headerButton.Content = headerGrid;
 
-        var detailsText = new TextBlock
+        var detailsText = new RichTextBlock
         {
             Foreground = SubtleBrush,
-            FontSize = 13,
-            TextWrapping = TextWrapping.WrapWholeWords
+            FontSize = 13
         };
 
         var detailsBorder = new Border
@@ -481,9 +481,8 @@ public sealed partial class LauncherWindow : Window
 
     private void UpdateTurnProgress(ConversationTurnView turn, AgentLoopProgress update)
     {
-        turn.SummaryText.Text = "Думаю...";
-        var details = BuildDetailsText(update.Status, update.Thinking);
-        turn.DetailsText.Text = details;
+        turn.SummaryText.Text = string.IsNullOrWhiteSpace(update.Status) ? "Думаю..." : update.Status.Trim();
+        ApplyDetailsText(turn.DetailsText, BuildDetailsText(update.Status, update.Thinking));
         RefreshTurnDetailsVisibility(turn);
         RefreshExpandedLayout();
 
@@ -506,7 +505,7 @@ public sealed partial class LauncherWindow : Window
 
         if (!string.IsNullOrWhiteSpace(result.Thinking))
         {
-            turn.DetailsText.Text = result.Thinking;
+            ApplyDetailsText(turn.DetailsText, result.Thinking);
         }
 
         RefreshTurnDetailsVisibility(turn);
@@ -523,7 +522,7 @@ public sealed partial class LauncherWindow : Window
         {
             turn.ErrorText.Text = string.Empty;
             turn.ErrorBorder.Visibility = Visibility.Collapsed;
-            turn.SummaryText.Text = result.WaitingForUser ? "Жду данные" : "Что думала и делала";
+            turn.SummaryText.Text = result.WaitingForUser ? "Жду данные" : "Готово";
 
             if (!string.IsNullOrWhiteSpace(result.Answer))
             {
@@ -574,7 +573,7 @@ public sealed partial class LauncherWindow : Window
 
     private void RefreshTurnDetailsVisibility(ConversationTurnView turn)
     {
-        var hasDetails = !string.IsNullOrWhiteSpace(turn.DetailsText.Text);
+        var hasDetails = turn.DetailsText.Blocks.Count > 0;
         turn.DetailsBorder.Visibility = hasDetails && turn.DetailsExpanded
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -592,9 +591,12 @@ public sealed partial class LauncherWindow : Window
     private void UpdateElapsedText(ConversationTurnView turn)
     {
         var elapsed = DateTimeOffset.Now - turn.StartedAt;
-        turn.ElapsedText.Text = elapsed.TotalMinutes >= 1
+        var duration = elapsed.TotalMinutes >= 1
             ? $"{Math.Max(1, (int)elapsed.TotalMinutes)}м"
             : $"{Math.Max(1, (int)elapsed.TotalSeconds)}с";
+        turn.ElapsedText.Text = turn.IsBusy
+            ? $"Думаю · {duration} ▼"
+            : $"Думал · {duration} ▼";
     }
 
     private void StopTurnTimerIfIdle()
@@ -638,6 +640,43 @@ public sealed partial class LauncherWindow : Window
         }
 
         return $"Сейчас: {status}{Environment.NewLine}{Environment.NewLine}{thinking.Trim()}";
+    }
+
+    private static void ApplyDetailsText(RichTextBlock block, string text)
+    {
+        block.Blocks.Clear();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        var sections = text
+            .Split($"{Environment.NewLine}{Environment.NewLine}", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var section in sections)
+        {
+            var lines = section.Split(Environment.NewLine, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length == 0)
+            {
+                continue;
+            }
+
+            var paragraph = new Paragraph();
+            var heading = new Run { Text = lines[0] };
+            var headingSpan = new Span();
+            headingSpan.Inlines.Add(heading);
+            headingSpan.FontWeight = Windows.UI.Text.FontWeights.SemiBold;
+            headingSpan.FontStyle = Windows.UI.Text.FontStyle.Italic;
+            paragraph.Inlines.Add(headingSpan);
+
+            for (var index = 1; index < lines.Length; index++)
+            {
+                paragraph.Inlines.Add(new LineBreak());
+                paragraph.Inlines.Add(new Run { Text = lines[index] });
+            }
+
+            block.Blocks.Add(paragraph);
+        }
     }
 
     private Task EnqueueOnUiAsync(Action action)
@@ -715,7 +754,7 @@ public sealed partial class LauncherWindow : Window
         TextBlock summaryText,
         TextBlock elapsedText,
         Border detailsBorder,
-        TextBlock detailsText,
+        RichTextBlock detailsText,
         Border answerBorder,
         TextBlock answerText,
         Border errorBorder,
@@ -728,7 +767,7 @@ public sealed partial class LauncherWindow : Window
         public TextBlock SummaryText { get; } = summaryText;
         public TextBlock ElapsedText { get; } = elapsedText;
         public Border DetailsBorder { get; } = detailsBorder;
-        public TextBlock DetailsText { get; } = detailsText;
+        public RichTextBlock DetailsText { get; } = detailsText;
         public Border AnswerBorder { get; } = answerBorder;
         public TextBlock AnswerText { get; } = answerText;
         public Border ErrorBorder { get; } = errorBorder;

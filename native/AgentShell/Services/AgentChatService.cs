@@ -24,7 +24,8 @@ public sealed class AgentChatService
         ["huggingface"] = TimeSpan.FromSeconds(3),
         ["gemini"] = TimeSpan.FromSeconds(2.5),
         ["mistral"] = TimeSpan.FromSeconds(2.5),
-        ["openai"] = TimeSpan.FromSeconds(2)
+        ["openai"] = TimeSpan.FromSeconds(2),
+        ["local"] = TimeSpan.Zero
     };
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> ProviderLocks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, DateTimeOffset> ProviderAvailableAt = new(StringComparer.OrdinalIgnoreCase);
@@ -33,6 +34,7 @@ public sealed class AgentChatService
     {
         Timeout = TimeSpan.FromSeconds(90)
     };
+    private readonly LocalLlamaService _localLlama = App.LocalLlama;
 
     public ModelRoute ResolveVisionRoute(ShellConfig config)
     {
@@ -48,16 +50,9 @@ public sealed class AgentChatService
             : null;
     }
 
-    public ModelRoute? ResolveOcrRoute(ShellConfig config)
-    {
-        return config.Models.UseSeparateOcr && !string.IsNullOrWhiteSpace(config.Models.Ocr.Model)
-            ? config.Models.Ocr
-            : null;
-    }
+    public bool ShouldShowPrimaryThinking(ShellConfig config) => config.Models.PrimaryThinking || config.Models.PrimaryMcpThinking;
 
-    public bool ShouldShowPrimaryThinking(ShellConfig config) => config.Models.PrimaryThinking;
-
-    public bool ShouldShowAnalysisThinking(ShellConfig config) => config.Models.AnalysisThinking;
+    public bool ShouldShowAnalysisThinking(ShellConfig config) => config.Models.AnalysisThinking || config.Models.AnalysisMcpThinking;
 
     public bool CanLikelyUseImages(ModelRoute route)
     {
@@ -101,12 +96,13 @@ public sealed class AgentChatService
         var provider = ResolveProvider(route, config, out var apiKey);
         var throttleKey = BuildThrottleKey(provider);
         StartupLogService.Info($"Running model request via {provider.Id}/{route.Model}.");
+        var baseUrl = await ResolveBaseUrlAsync(provider, config, route.Model, cancellationToken);
 
         return provider.Id switch
         {
             "gemini" => await RequestGeminiAsync(provider, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
             "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
-            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken)
+            _ => await RequestOpenAiCompatibleAsync(baseUrl, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken)
         };
     }
 
@@ -121,11 +117,12 @@ public sealed class AgentChatService
         var provider = ResolveProvider(route, config, out var apiKey);
         var throttleKey = BuildThrottleKey(provider);
         StartupLogService.Info($"Running agent step via {provider.Id}/{route.Model}. screenshot={screenshot is not null}");
+        var baseUrl = await ResolveBaseUrlAsync(provider, config, route.Model, cancellationToken);
         var raw = provider.Id switch
         {
             "gemini" => await RequestGeminiAsync(provider, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
             "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
-            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken)
+            _ => await RequestOpenAiCompatibleAsync(baseUrl, throttleKey, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken)
         };
 
         return ExtractJsonObject(raw);
@@ -137,7 +134,7 @@ public sealed class AgentChatService
             ?? throw new InvalidOperationException($"Unknown provider: {route.Provider}");
 
         apiKey = config.Providers.GetValueOrDefault(provider.Id)?.ApiKey ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(apiKey))
+        if (provider.Id != "local" && string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException($"API key is missing for provider {provider.Name}.");
         }
@@ -148,6 +145,20 @@ public sealed class AgentChatService
         }
 
         return provider;
+    }
+
+    private async Task<string> ResolveBaseUrlAsync(
+        ProviderDescriptor provider,
+        ShellConfig config,
+        string modelId,
+        CancellationToken cancellationToken)
+    {
+        if (provider.Id != "local")
+        {
+            return provider.BaseUrl;
+        }
+
+        return await _localLlama.EnsureServerAsync(config, modelId, cancellationToken);
     }
 
     private async Task<string> RequestOpenAiCompatibleAsync(
@@ -172,7 +183,10 @@ public sealed class AgentChatService
             () =>
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl.TrimEnd('/')}/chat/completions");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                if (!string.IsNullOrWhiteSpace(apiKey))
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                }
                 request.Content = new StringContent(
                     JsonSerializer.Serialize(new
                     {

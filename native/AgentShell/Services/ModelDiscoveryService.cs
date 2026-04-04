@@ -8,8 +8,17 @@ public sealed class ModelDiscoveryService
 {
     private readonly HttpClient _httpClient = new();
 
-    public async Task<IReadOnlyList<string>> LoadModelsAsync(ProviderDescriptor provider, string apiKey)
+    public async Task<IReadOnlyList<ModelChoice>> LoadModelsAsync(ProviderDescriptor provider, string apiKey, ShellConfig config)
     {
+        if (provider.Id == "local")
+        {
+            return config.LocalAi.Models
+                .Where(model => !string.IsNullOrWhiteSpace(model.ModelPath))
+                .Select(ModelCapabilityService.ToLocalChoice)
+                .OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             return [];
@@ -23,7 +32,7 @@ public sealed class ModelDiscoveryService
         };
     }
 
-    private async Task<IReadOnlyList<string>> LoadOpenAiCompatibleModelsAsync(ProviderDescriptor provider, string apiKey)
+    private async Task<IReadOnlyList<ModelChoice>> LoadOpenAiCompatibleModelsAsync(ProviderDescriptor provider, string apiKey)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"{provider.BaseUrl.TrimEnd('/')}/models");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
@@ -41,10 +50,11 @@ public sealed class ModelDiscoveryService
             .OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(model => model, StringComparer.OrdinalIgnoreCase)
+            .Select(model => ModelCapabilityService.ToChoice(provider, model))
             .ToList();
     }
 
-    private async Task<IReadOnlyList<string>> LoadGeminiModelsAsync(ProviderDescriptor provider, string apiKey)
+    private async Task<IReadOnlyList<ModelChoice>> LoadGeminiModelsAsync(ProviderDescriptor provider, string apiKey)
     {
         using var response = await _httpClient.GetAsync($"{provider.BaseUrl.TrimEnd('/')}/models?key={Uri.EscapeDataString(apiKey)}");
         response.EnsureSuccessStatusCode();
@@ -61,10 +71,11 @@ public sealed class ModelDiscoveryService
             .Select(name => name.Replace("models/", string.Empty, StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(model => model, StringComparer.OrdinalIgnoreCase)
+            .Select(model => ModelCapabilityService.ToChoice(provider, model))
             .ToList();
     }
 
-    private async Task<IReadOnlyList<string>> LoadHuggingFaceModelsAsync(string apiKey)
+    private async Task<IReadOnlyList<ModelChoice>> LoadHuggingFaceModelsAsync(string apiKey)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, "https://huggingface.co/api/models?sort=downloads&direction=-1&limit=200");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
@@ -82,6 +93,7 @@ public sealed class ModelDiscoveryService
             .OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(model => model, StringComparer.OrdinalIgnoreCase)
+            .Select(model => ModelCapabilityService.ToChoice(new ProviderDescriptor("huggingface", "Hugging Face", "https://huggingface.co"), model))
             .ToList();
     }
 }

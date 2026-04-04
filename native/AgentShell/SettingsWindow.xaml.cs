@@ -15,7 +15,8 @@ public sealed partial class SettingsWindow : Window
     private readonly ShellConfigService _config = App.ConfigService;
     private readonly RuntimeCatalogService _runtimeCatalog = App.RuntimeCatalog;
     private readonly RuntimeWidgetService _runtimeWidgets = new();
-    private readonly IReadOnlyList<ProviderDescriptor> _providers = ProviderCatalog.All;
+    private readonly IReadOnlyList<ProviderDescriptor> _remoteProviders = ProviderCatalog.RemoteOnly;
+    private readonly IReadOnlyList<ProviderDescriptor> _modelProviders = ProviderCatalog.All;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly SemaphoreSlim _saveLock = new(1, 1);
     private bool _isLoading;
@@ -63,18 +64,20 @@ public sealed partial class SettingsWindow : Window
         {
             await EnqueueOnUiAsync(() =>
             {
-                ProvidersList.ItemsSource = _providers;
+                ProvidersList.ItemsSource = _remoteProviders;
+                LocalIdleSecondsBox.Text = Math.Max(10, _config.Current.LocalAi.IdleUnloadSeconds).ToString();
+                LocalModelsList.ItemsSource = _config.Current.LocalAi.Models.OrderBy(model => model.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
                 BindRouteSelector(PrimaryProviderCombo, _config.Current.Models.Primary);
                 BindRouteSelector(AnalysisProviderCombo, _config.Current.Models.Analysis);
                 BindRouteSelector(VisionProviderCombo, _config.Current.Models.Vision);
-                BindRouteSelector(OcrProviderCombo, _config.Current.Models.Ocr);
 
                 PrimaryThinkingToggle.IsChecked = _config.Current.Models.PrimaryThinking;
+                PrimaryMcpThinkingToggle.IsChecked = _config.Current.Models.PrimaryMcpThinking;
                 AnalysisThinkingToggle.IsChecked = _config.Current.Models.AnalysisThinking;
+                AnalysisMcpThinkingToggle.IsChecked = _config.Current.Models.AnalysisMcpThinking;
                 SeparateAnalysisToggle.IsChecked = _config.Current.Models.UseSeparateAnalysis;
                 SeparateVisionToggle.IsChecked = _config.Current.Models.UseSeparateVision;
-                SeparateOcrToggle.IsChecked = _config.Current.Models.UseSeparateOcr;
                 ApplySeparateRouteVisibility();
                 OperationStatusText.Text = string.Empty;
             });
@@ -82,7 +85,6 @@ public sealed partial class SettingsWindow : Window
             await LoadModelChoicesAsync(PrimaryProviderCombo, PrimaryModelCombo, _config.Current.Models.Primary.Model);
             await LoadModelChoicesAsync(AnalysisProviderCombo, AnalysisModelCombo, _config.Current.Models.Analysis.Model);
             await LoadModelChoicesAsync(VisionProviderCombo, VisionModelCombo, _config.Current.Models.Vision.Model);
-            await LoadModelChoicesAsync(OcrProviderCombo, OcrModelCombo, _config.Current.Models.Ocr.Model);
 
             var tools = await _runtimeCatalog.LoadToolsAsync();
             var widgets = await _runtimeCatalog.LoadWidgetsAsync();
@@ -91,6 +93,7 @@ public sealed partial class SettingsWindow : Window
             {
                 ToolsList.ItemsSource = tools;
                 WidgetsList.ItemsSource = widgets;
+                ApplyThinkingAvailability();
             });
         }
         catch (Exception ex)
@@ -106,9 +109,9 @@ public sealed partial class SettingsWindow : Window
 
     private void BindRouteSelector(ComboBox comboBox, ModelRoute route)
     {
-        comboBox.ItemsSource = _providers;
+        comboBox.ItemsSource = _modelProviders;
         comboBox.DisplayMemberPath = nameof(ProviderDescriptor.Name);
-        comboBox.SelectedItem = _providers.FirstOrDefault(provider => provider.Id == route.Provider) ?? _providers[0];
+        comboBox.SelectedItem = _modelProviders.FirstOrDefault(provider => provider.Id == route.Provider) ?? _modelProviders[0];
     }
 
     private async Task LoadModelChoicesAsync(ComboBox providerCombo, ComboBox modelCombo, string selectedModel)
@@ -128,13 +131,19 @@ public sealed partial class SettingsWindow : Window
         }
 
         var apiKey = _config.Current.Providers.GetValueOrDefault(provider.Id)?.ApiKey ?? string.Empty;
-        IReadOnlyList<string> models;
+        IReadOnlyList<ModelChoice> models;
         var placeholder = "Выберите модель";
 
         try
         {
-            models = await _modelDiscovery.LoadModelsAsync(provider, apiKey);
-            if (string.IsNullOrWhiteSpace(apiKey))
+            models = await _modelDiscovery.LoadModelsAsync(provider, apiKey, _config.Current);
+            if (provider.Id == "local")
+            {
+                placeholder = models.Count == 0
+                    ? "Добавь GGUF модель в разделе Локальные ИИ"
+                    : "Выберите локальную модель";
+            }
+            else if (string.IsNullOrWhiteSpace(apiKey))
             {
                 placeholder = "Введите API key";
             }
@@ -153,9 +162,11 @@ public sealed partial class SettingsWindow : Window
         await EnqueueOnUiAsync(() =>
         {
             modelCombo.ItemsSource = models;
-            modelCombo.SelectedItem = models.FirstOrDefault(model => model == selectedModel) ?? models.FirstOrDefault();
+            modelCombo.SelectedItem = models.FirstOrDefault(model => model.Id == selectedModel) ?? models.FirstOrDefault();
             modelCombo.PlaceholderText = placeholder;
         });
+
+        await EnqueueOnUiAsync(ApplyThinkingAvailability);
 
         if (!_isLoading)
         {
@@ -166,6 +177,7 @@ public sealed partial class SettingsWindow : Window
     private void ShowTab(FrameworkElement view)
     {
         ProvidersView.Visibility = Visibility.Collapsed;
+        LocalAiView.Visibility = Visibility.Collapsed;
         ModelsView.Visibility = Visibility.Collapsed;
         ToolsView.Visibility = Visibility.Collapsed;
         WidgetsView.Visibility = Visibility.Collapsed;
@@ -173,6 +185,8 @@ public sealed partial class SettingsWindow : Window
     }
 
     private void ProvidersTabButton_Click(object sender, RoutedEventArgs e) => ShowTab(ProvidersView);
+
+    private void LocalAiTabButton_Click(object sender, RoutedEventArgs e) => ShowTab(LocalAiView);
 
     private void ModelsTabButton_Click(object sender, RoutedEventArgs e) => ShowTab(ModelsView);
 
@@ -263,26 +277,83 @@ public sealed partial class SettingsWindow : Window
         }, $"provider key update {providerId}");
     }
 
+    private async void LocalIdleSecondsBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading)
+        {
+            return;
+        }
+
+        await RunUiSafeAsync(
+            () => SaveCurrentConfigAsync("Параметры локальных ИИ обновлены."),
+            "local idle change");
+    }
+
+    private async void AddLocalModel_Click(object sender, RoutedEventArgs e)
+    {
+        await RunUiSafeAsync(async () =>
+        {
+            var path = LocalModelPathBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new InvalidOperationException("Укажи путь к .gguf файлу.");
+            }
+
+            var name = string.IsNullOrWhiteSpace(LocalModelNameBox.Text)
+                ? Path.GetFileNameWithoutExtension(path)
+                : LocalModelNameBox.Text.Trim();
+
+            _config.Current.LocalAi.Models.Add(new LocalModelConfig
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Name = name,
+                ModelPath = path,
+                ContextSize = ParseInt(LocalModelContextBox.Text, 4096, 512, 131072),
+                GpuLayers = ParseInt(LocalModelGpuLayersBox.Text, 0, 0, 256),
+                SupportsThinking = LocalModelSupportsThinkingToggle.IsChecked == true
+            });
+
+            LocalModelNameBox.Text = string.Empty;
+            LocalModelPathBox.Text = string.Empty;
+            LocalModelContextBox.Text = string.Empty;
+            LocalModelGpuLayersBox.Text = string.Empty;
+            LocalModelSupportsThinkingToggle.IsChecked = false;
+
+            await SaveCurrentConfigAsync("Локальная модель добавлена.");
+            await LoadSafeAsync();
+        }, "add local model");
+    }
+
+    private async void RemoveLocalModel_Click(object sender, RoutedEventArgs e)
+    {
+        await RunUiSafeAsync(async () =>
+        {
+            if (sender is not Button button || button.Tag is not string modelId)
+            {
+                return;
+            }
+
+            _config.Current.LocalAi.Models.RemoveAll(model => string.Equals(model.Id, modelId, StringComparison.OrdinalIgnoreCase));
+            await SaveCurrentConfigAsync("Локальная модель удалена.");
+            await LoadSafeAsync();
+        }, "remove local model");
+    }
+
     private async Task RefreshProvidersUsingKeyAsync(string providerId)
     {
         if ((PrimaryProviderCombo.SelectedItem as ProviderDescriptor)?.Id == providerId)
         {
-            await LoadModelChoicesAsync(PrimaryProviderCombo, PrimaryModelCombo, string.Empty);
+            await LoadModelChoicesAsync(PrimaryProviderCombo, PrimaryModelCombo, CaptureRoute(PrimaryProviderCombo, PrimaryModelCombo).Model);
         }
 
         if ((AnalysisProviderCombo.SelectedItem as ProviderDescriptor)?.Id == providerId)
         {
-            await LoadModelChoicesAsync(AnalysisProviderCombo, AnalysisModelCombo, string.Empty);
+            await LoadModelChoicesAsync(AnalysisProviderCombo, AnalysisModelCombo, CaptureRoute(AnalysisProviderCombo, AnalysisModelCombo).Model);
         }
 
         if ((VisionProviderCombo.SelectedItem as ProviderDescriptor)?.Id == providerId)
         {
-            await LoadModelChoicesAsync(VisionProviderCombo, VisionModelCombo, string.Empty);
-        }
-
-        if ((OcrProviderCombo.SelectedItem as ProviderDescriptor)?.Id == providerId)
-        {
-            await LoadModelChoicesAsync(OcrProviderCombo, OcrModelCombo, string.Empty);
+            await LoadModelChoicesAsync(VisionProviderCombo, VisionModelCombo, CaptureRoute(VisionProviderCombo, VisionModelCombo).Model);
         }
     }
 
@@ -300,11 +371,6 @@ public sealed partial class SettingsWindow : Window
         => await RunUiSafeAsync(
             () => ProviderSelectionChangedAsync(VisionProviderCombo, VisionModelCombo),
             "vision provider selection");
-
-    private async void OcrProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => await RunUiSafeAsync(
-            () => ProviderSelectionChangedAsync(OcrProviderCombo, OcrModelCombo),
-            "ocr provider selection");
 
     private async Task ProviderSelectionChangedAsync(ComboBox providerCombo, ComboBox modelCombo)
     {
@@ -328,9 +394,11 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
-        await RunUiSafeAsync(
-            () => SaveCurrentConfigAsync("Модель обновлена."),
-            "model selection");
+        await RunUiSafeAsync(async () =>
+        {
+            ApplyThinkingAvailability();
+            await SaveCurrentConfigAsync("Модель обновлена.");
+        }, "model selection");
     }
 
     private async void ModelSetting_Changed(object sender, RoutedEventArgs e)
@@ -362,7 +430,23 @@ public sealed partial class SettingsWindow : Window
     {
         AnalysisPanel.Visibility = SeparateAnalysisToggle.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         VisionPanel.Visibility = SeparateVisionToggle.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        OcrPanel.Visibility = SeparateOcrToggle.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ApplyThinkingAvailability()
+    {
+        ApplyThinkingAvailability(PrimaryModelCombo, PrimaryThinkingToggle);
+        ApplyThinkingAvailability(AnalysisModelCombo, AnalysisThinkingToggle);
+    }
+
+    private static void ApplyThinkingAvailability(ComboBox modelCombo, CheckBox thinkingToggle)
+    {
+        var selected = modelCombo.SelectedItem as ModelChoice;
+        var enabled = selected?.SupportsThinking == true;
+        thinkingToggle.IsEnabled = enabled;
+        if (!enabled)
+        {
+            thinkingToggle.IsChecked = false;
+        }
     }
 
     private async void RemoveTool_Click(object sender, RoutedEventArgs e)
@@ -442,22 +526,30 @@ public sealed partial class SettingsWindow : Window
 
     private void SyncModelSettings()
     {
+        _config.Current.LocalAi.IdleUnloadSeconds = ParseInt(LocalIdleSecondsBox.Text, 60, 10, 3600);
         _config.Current.Models.Primary = CaptureRoute(PrimaryProviderCombo, PrimaryModelCombo);
         _config.Current.Models.PrimaryThinking = PrimaryThinkingToggle.IsChecked == true;
+        _config.Current.Models.PrimaryMcpThinking = PrimaryMcpThinkingToggle.IsChecked == true;
         _config.Current.Models.UseSeparateAnalysis = SeparateAnalysisToggle.IsChecked == true;
         _config.Current.Models.Analysis = CaptureRoute(AnalysisProviderCombo, AnalysisModelCombo);
         _config.Current.Models.AnalysisThinking = AnalysisThinkingToggle.IsChecked == true;
+        _config.Current.Models.AnalysisMcpThinking = AnalysisMcpThinkingToggle.IsChecked == true;
         _config.Current.Models.UseSeparateVision = SeparateVisionToggle.IsChecked == true;
         _config.Current.Models.Vision = CaptureRoute(VisionProviderCombo, VisionModelCombo);
-        _config.Current.Models.UseSeparateOcr = SeparateOcrToggle.IsChecked == true;
-        _config.Current.Models.Ocr = CaptureRoute(OcrProviderCombo, OcrModelCombo);
     }
 
     private static ModelRoute CaptureRoute(ComboBox providerCombo, ComboBox modelCombo)
     {
         var provider = (providerCombo.SelectedItem as ProviderDescriptor)?.Id ?? "sosiskibot";
-        var model = modelCombo.SelectedItem as string ?? string.Empty;
+        var model = (modelCombo.SelectedItem as ModelChoice)?.Id ?? string.Empty;
         return new ModelRoute(provider, model);
+    }
+
+    private static int ParseInt(string? raw, int fallback, int min, int max)
+    {
+        return int.TryParse(raw?.Trim(), out var value)
+            ? Math.Clamp(value, min, max)
+            : fallback;
     }
 
     private Task EnqueueOnUiAsync(Action action)
