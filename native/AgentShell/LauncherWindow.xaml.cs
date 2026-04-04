@@ -1,4 +1,5 @@
 using AgentShell.Services;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
 using WinRT.Interop;
@@ -9,6 +10,7 @@ public sealed partial class LauncherWindow : Window
 {
     private readonly GlobalHotkeyService _hotkey;
     private readonly WindowVisualService _visuals;
+    private readonly DispatcherQueue _dispatcherQueue;
     private bool _isVisible;
     private bool _ignoreNextDeactivation;
 
@@ -18,6 +20,7 @@ public sealed partial class LauncherWindow : Window
         {
             InitializeComponent();
             StartupLogService.Info("LauncherWindow initialized.");
+            _dispatcherQueue = DispatcherQueue;
 
             _visuals = new WindowVisualService(this, ShellPanel);
             _visuals.InitializeLauncherChrome();
@@ -25,7 +28,7 @@ public sealed partial class LauncherWindow : Window
             StartupLogService.Info("Launcher visuals initialized.");
 
             _hotkey = new GlobalHotkeyService(this, 7001, 0xA3);
-            _hotkey.HotkeyPressed += async (_, _) => await ToggleAsync();
+            _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
             StartupLogService.Info("Global hotkey registered for Right Ctrl.");
 
             Activated += LauncherWindow_Activated;
@@ -138,6 +141,22 @@ public sealed partial class LauncherWindow : Window
         }
 
         HideAnimated();
+    }
+
+    private void Hotkey_HotkeyPressed(object? sender, EventArgs e)
+    {
+        StartupLogService.Info("Global hotkey pressed.");
+        _dispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                await ToggleAsync();
+            }
+            catch (Exception ex)
+            {
+                StartupLogService.Error($"Hotkey toggle failed: {ex}");
+            }
+        });
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
