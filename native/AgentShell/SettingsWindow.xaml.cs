@@ -16,6 +16,7 @@ public sealed partial class SettingsWindow : Window
     private readonly RuntimeCatalogService _runtimeCatalog = App.RuntimeCatalog;
     private readonly IReadOnlyList<ProviderDescriptor> _providers = ProviderCatalog.All;
     private readonly DispatcherQueue _dispatcherQueue;
+    private bool _isLoading;
 
     public SettingsWindow()
     {
@@ -50,6 +51,7 @@ public sealed partial class SettingsWindow : Window
 
     private async Task LoadSafeAsync()
     {
+        _isLoading = true;
         try
         {
             await EnqueueOnUiAsync(() =>
@@ -88,6 +90,10 @@ public sealed partial class SettingsWindow : Window
         {
             StartupLogService.Error($"Settings load failed: {ex}");
             await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Ошибка загрузки настроек: {ex.Message}");
+        }
+        finally
+        {
+            _isLoading = false;
         }
     }
 
@@ -143,6 +149,11 @@ public sealed partial class SettingsWindow : Window
             modelCombo.SelectedItem = models.FirstOrDefault(model => model == selectedModel) ?? models.FirstOrDefault();
             modelCombo.PlaceholderText = placeholder;
         });
+
+        if (!_isLoading)
+        {
+            SyncModelSettings();
+        }
     }
 
     private void ShowTab(FrameworkElement view)
@@ -164,9 +175,7 @@ public sealed partial class SettingsWindow : Window
 
     private async void SaveButton_Click(object sender, RoutedEventArgs e)
     {
-        SyncModelSettings();
-        await _config.SaveAsync();
-        OperationStatusText.Text = $"Сохранено: {_config.NativeConfigPath}";
+        await SaveCurrentConfigAsync($"Сохранено: {_config.NativeConfigPath}");
     }
 
     private async void BackupButton_Click(object sender, RoutedEventArgs e)
@@ -230,6 +239,7 @@ public sealed partial class SettingsWindow : Window
         }
 
         await RefreshProvidersUsingKeyAsync(providerId);
+        await SaveCurrentConfigAsync("API key updated.");
     }
 
     private async Task RefreshProvidersUsingKeyAsync(string providerId)
@@ -256,20 +266,61 @@ public sealed partial class SettingsWindow : Window
     }
 
     private async void PrimaryProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => await LoadModelChoicesAsync(PrimaryProviderCombo, PrimaryModelCombo, string.Empty);
+        => await ProviderSelectionChangedAsync(PrimaryProviderCombo, PrimaryModelCombo);
 
     private async void AnalysisProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => await LoadModelChoicesAsync(AnalysisProviderCombo, AnalysisModelCombo, string.Empty);
+        => await ProviderSelectionChangedAsync(AnalysisProviderCombo, AnalysisModelCombo);
 
     private async void VisionProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => await LoadModelChoicesAsync(VisionProviderCombo, VisionModelCombo, string.Empty);
+        => await ProviderSelectionChangedAsync(VisionProviderCombo, VisionModelCombo);
 
     private async void OcrProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => await LoadModelChoicesAsync(OcrProviderCombo, OcrModelCombo, string.Empty);
+        => await ProviderSelectionChangedAsync(OcrProviderCombo, OcrModelCombo);
 
-    private void SeparateToggle_Changed(object sender, RoutedEventArgs e)
+    private async Task ProviderSelectionChangedAsync(ComboBox providerCombo, ComboBox modelCombo)
+    {
+        if (!_isLoading)
+        {
+            SyncModelSettings();
+        }
+
+        await LoadModelChoicesAsync(providerCombo, modelCombo, string.Empty);
+
+        if (!_isLoading)
+        {
+            await SaveCurrentConfigAsync("Модельный провайдер обновлен.");
+        }
+    }
+
+    private async void ModelSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoading)
+        {
+            return;
+        }
+
+        await SaveCurrentConfigAsync("Модель обновлена.");
+    }
+
+    private async void ModelSetting_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading)
+        {
+            return;
+        }
+
+        await SaveCurrentConfigAsync("Параметр модели обновлен.");
+    }
+
+    private async void SeparateToggle_Changed(object sender, RoutedEventArgs e)
     {
         ApplySeparateRouteVisibility();
+        if (_isLoading)
+        {
+            return;
+        }
+
+        await SaveCurrentConfigAsync("Маршрутизация моделей обновлена.");
     }
 
     private void ApplySeparateRouteVisibility()
@@ -291,6 +342,7 @@ public sealed partial class SettingsWindow : Window
 
     private void TestWidget_Click(object sender, RoutedEventArgs e)
     {
+        OperationStatusText.Text = "Тест виджета пока заглушка.";
     }
 
     private async Task RemoveRuntimeItemAsync(object sender, bool isWidget)
@@ -304,11 +356,20 @@ public sealed partial class SettingsWindow : Window
         if (isWidget)
         {
             WidgetsList.ItemsSource = await _runtimeCatalog.LoadWidgetsAsync();
+            OperationStatusText.Text = "Виджет удален.";
         }
         else
         {
             ToolsList.ItemsSource = await _runtimeCatalog.LoadToolsAsync();
+            OperationStatusText.Text = "Тулз удален.";
         }
+    }
+
+    private async Task SaveCurrentConfigAsync(string statusText)
+    {
+        SyncModelSettings();
+        await _config.SaveAsync();
+        OperationStatusText.Text = statusText;
     }
 
     private void SyncModelSettings()
@@ -356,6 +417,8 @@ public sealed partial class SettingsWindow : Window
     private void SettingsWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         args.Cancel = true;
+        SyncModelSettings();
+        _config.Save();
         StartupLogService.Info("Settings close intercepted, hiding instead.");
         ShowWindow(WindowNative.GetWindowHandle(this), SwHide);
     }

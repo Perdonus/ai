@@ -12,38 +12,49 @@ public sealed class TrayIconService : IDisposable
     private const uint NimAdd = 0x00000000;
     private const uint NimModify = 0x00000001;
     private const uint NimDelete = 0x00000002;
+    private const uint NimSetversion = 0x00000004;
+    private const uint NotifyIconVersion4 = 4;
     private const uint WmLbuttonup = 0x0202;
     private const uint WmLbuttondblclk = 0x0203;
     private const uint WmRbuttonup = 0x0205;
 
-    private readonly nint _hwnd;
     private readonly Action _openLauncher;
+    private readonly GlobalHotkeyService _hotkeyService;
     private NotifyIconData _data;
 
     public TrayIconService(Window window, Action openLauncher, GlobalHotkeyService hotkeyService)
     {
-        _hwnd = WindowNative.GetWindowHandle(window);
         _openLauncher = openLauncher;
-        hotkeyService.TrayMessageReceived += HotkeyService_TrayMessageReceived;
+        _hotkeyService = hotkeyService;
+        _hotkeyService.TrayMessageReceived += HotkeyService_TrayMessageReceived;
 
+        var hwnd = WindowNative.GetWindowHandle(window);
         _data = new NotifyIconData
         {
             cbSize = (uint)Marshal.SizeOf<NotifyIconData>(),
-            hWnd = _hwnd,
+            hWnd = hwnd,
             uID = 1,
             uFlags = NifMessage | NifIcon | NifTip,
             uCallbackMessage = GlobalHotkeyService.TrayCallbackMessage,
             hIcon = LoadIconForTray(),
-            szTip = "AI Agent"
+            szTip = "AI Agent",
+            szInfo = string.Empty,
+            szInfoTitle = string.Empty,
+            Anonymous = new NotifyIconDataTimeoutUnion
+            {
+                uVersion = NotifyIconVersion4
+            }
         };
 
-        _ = ShellNotifyIcon(NimAdd, ref _data);
-        _ = ShellNotifyIcon(NimModify, ref _data);
+        CallShellNotifyIcon(NimAdd);
+        CallShellNotifyIcon(NimSetversion);
+        CallShellNotifyIcon(NimModify);
     }
 
     public void Dispose()
     {
-        _ = ShellNotifyIcon(NimDelete, ref _data);
+        _hotkeyService.TrayMessageReceived -= HotkeyService_TrayMessageReceived;
+        CallShellNotifyIcon(NimDelete);
         if (_data.hIcon != nint.Zero)
         {
             _ = DestroyIcon(_data.hIcon);
@@ -59,13 +70,21 @@ public sealed class TrayIconService : IDisposable
         }
     }
 
+    private void CallShellNotifyIcon(uint message)
+    {
+        if (!ShellNotifyIcon(message, ref _data))
+        {
+            throw new InvalidOperationException($"Shell_NotifyIconW failed for message 0x{message:X}.");
+        }
+    }
+
     private static nint LoadIconForTray()
     {
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
         return File.Exists(iconPath) ? ExtractIconW(nint.Zero, iconPath, 0) : nint.Zero;
     }
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    [DllImport("shell32.dll", EntryPoint = "Shell_NotifyIconW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool ShellNotifyIcon(uint dwMessage, ref NotifyIconData lpData);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
@@ -93,7 +112,7 @@ public sealed class TrayIconService : IDisposable
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
         public string szInfo;
 
-        public uint uTimeoutOrVersion;
+        public NotifyIconDataTimeoutUnion Anonymous;
 
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
         public string szInfoTitle;
@@ -101,5 +120,15 @@ public sealed class TrayIconService : IDisposable
         public uint dwInfoFlags;
         public Guid guidItem;
         public nint hBalloonIcon;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct NotifyIconDataTimeoutUnion
+    {
+        [FieldOffset(0)]
+        public uint uTimeout;
+
+        [FieldOffset(0)]
+        public uint uVersion;
     }
 }

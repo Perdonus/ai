@@ -1,10 +1,10 @@
+using System.Runtime.InteropServices;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Hosting;
 using Windows.Graphics;
-using System.Runtime.InteropServices;
 using WinRT.Interop;
 
 namespace AgentShell.Services;
@@ -13,8 +13,9 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 {
     private const int LauncherWidth = 520;
     private const int LauncherHeight = 340;
-    private const int VisibleMargin = 40;
-    private const int HiddenOffset = 36;
+    private const int VisibleMargin = 24;
+    private const int SwHide = 0;
+    private const int SwShow = 5;
 
     private readonly Window _window = window;
     private readonly FrameworkElement _animatedRoot = animatedRoot;
@@ -40,23 +41,11 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         StartupLogService.Info($"Launcher chrome initialized with size {LauncherWidth}x{LauncherHeight}.");
     }
 
-    public void MoveTopRight(bool visible)
+    public void HideImmediately()
     {
-        var workArea = GetCurrentMonitorWorkArea();
-        var width = Math.Max(_appWindow.Size.Width, LauncherWidth);
-        var height = Math.Max(_appWindow.Size.Height, LauncherHeight);
-        var visibleX = workArea.X + workArea.Width - width - VisibleMargin;
-        var hiddenX = workArea.X + workArea.Width + HiddenOffset;
-        var maxVisibleX = workArea.X + Math.Max(0, workArea.Width - width);
-        var x = visible
-            ? Math.Clamp(visibleX, workArea.X, maxVisibleX)
-            : hiddenX;
-        var maxY = workArea.Y + Math.Max(0, workArea.Height - height);
-        var y = Math.Clamp(workArea.Y + VisibleMargin, workArea.Y, maxY);
-
-        _appWindow.Move(new PointInt32(x, y));
-        StartupLogService.Info(
-            $"Launcher moved. visible={visible}; workArea={workArea.X},{workArea.Y},{workArea.Width},{workArea.Height}; size={width}x{height}; target={x},{y}");
+        var hwnd = WindowNative.GetWindowHandle(_window);
+        _ = ShowWindow(hwnd, SwHide);
+        StartupLogService.Info("Launcher hidden with SW_HIDE.");
     }
 
     public async Task AnimateAsync(bool show)
@@ -76,7 +65,9 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
         if (show)
         {
-            MoveTopRight(true);
+            MoveTopRight();
+            var hwnd = WindowNative.GetWindowHandle(_window);
+            _ = ShowWindow(hwnd, SwShow);
             _window.Activate();
             BringToFront();
         }
@@ -88,7 +79,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
         if (!show)
         {
-            await EnqueueAsync(() => MoveTopRight(false));
+            await EnqueueAsync(HideImmediately);
         }
     }
 
@@ -124,6 +115,21 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         StartupLogService.Info($"Launcher extended window style set to 0x{exStyle:X}.");
     }
 
+    private void MoveTopRight()
+    {
+        var workArea = GetCurrentMonitorWorkArea();
+        var width = Math.Max(_appWindow.Size.Width, LauncherWidth);
+        var height = Math.Max(_appWindow.Size.Height, LauncherHeight);
+        var x = Math.Max(workArea.X, workArea.X + workArea.Width - width - VisibleMargin);
+        var y = Math.Max(workArea.Y, workArea.Y + VisibleMargin);
+        var maxY = workArea.Y + Math.Max(0, workArea.Height - height);
+        y = Math.Clamp(y, workArea.Y, maxY);
+
+        _appWindow.Move(new PointInt32(x, y));
+        StartupLogService.Info(
+            $"Launcher moved. workArea={workArea.X},{workArea.Y},{workArea.Width},{workArea.Height}; size={width}x{height}; target={x},{y}");
+    }
+
     private RectInt32 GetCurrentMonitorWorkArea()
     {
         if (!GetCursorPos(out var cursor))
@@ -132,23 +138,10 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
             return new RectInt32(fallback.X, fallback.Y, fallback.Width, fallback.Height);
         }
 
-        var monitor = MonitorFromPoint(cursor, MonitorDefaulttonearest);
-        if (monitor == nint.Zero)
-        {
-            var fallback = DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary).WorkArea;
-            return new RectInt32(fallback.X, fallback.Y, fallback.Width, fallback.Height);
-        }
-
-        var monitorInfo = new MonitorInfoEx();
-        monitorInfo.cbSize = Marshal.SizeOf<MonitorInfoEx>();
-        if (!GetMonitorInfo(monitor, ref monitorInfo))
-        {
-            var fallback = DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary).WorkArea;
-            return new RectInt32(fallback.X, fallback.Y, fallback.Width, fallback.Height);
-        }
-
-        var rc = monitorInfo.rcWork;
-        return new RectInt32(rc.Left, rc.Top, rc.Right - rc.Left, rc.Bottom - rc.Top);
+        var displayArea = DisplayArea.GetFromPoint(new PointInt32(cursor.X, cursor.Y), DisplayAreaFallback.Nearest);
+        var workArea = displayArea.WorkArea;
+        StartupLogService.Info($"Cursor position captured at {cursor.X},{cursor.Y}.");
+        return new RectInt32(workArea.X, workArea.Y, workArea.Width, workArea.Height);
     }
 
     private void BringToFront()
@@ -164,8 +157,6 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     }
 
     private const int GwlExstyle = -20;
-    private const uint MonitorDefaulttonearest = 2;
-    private const int SwShow = 5;
     private const uint SwpNosize = 0x0001;
     private const uint SwpNomove = 0x0002;
     private const long WsExToolwindow = 0x00000080L;
@@ -197,37 +188,10 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetCursorPos(out Point point);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern nint MonitorFromPoint(Point pt, uint dwFlags);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern bool GetMonitorInfo(nint hMonitor, ref MonitorInfoEx lpmi);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Rect
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
-
     [StructLayout(LayoutKind.Sequential)]
     private struct Point
     {
         public int X;
         public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-    private struct MonitorInfoEx
-    {
-        public int cbSize;
-        public Rect rcMonitor;
-        public Rect rcWork;
-        public uint dwFlags;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string szDevice;
     }
 }

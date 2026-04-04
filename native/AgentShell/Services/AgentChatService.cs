@@ -12,7 +12,11 @@ public sealed class AgentChatService
         Timeout = TimeSpan.FromSeconds(90)
     };
 
-    public async Task<AgentTurnResult> RunAsync(ShellConfig config, string prompt, CancellationToken cancellationToken)
+    public async Task<AgentTurnResult> RunAsync(
+        ShellConfig config,
+        string prompt,
+        IProgress<AgentTurnProgress>? progress,
+        CancellationToken cancellationToken)
     {
         var primaryRoute = config.Models.Primary;
         if (string.IsNullOrWhiteSpace(primaryRoute.Model))
@@ -20,18 +24,33 @@ public sealed class AgentChatService
             return new AgentTurnResult(string.Empty, string.Empty, "Select a primary model first.");
         }
 
-        string thinking = string.Empty;
+        progress?.Report(new AgentTurnProgress("Preparing request...", string.Empty, string.Empty));
+
+        var visibleThinking = string.Empty;
+        var hiddenReasoning = string.Empty;
+
         if (config.Models.UseSeparateAnalysis && !string.IsNullOrWhiteSpace(config.Models.Analysis.Model))
         {
-            thinking = await RequestReasoningAsync(config, config.Models.Analysis, prompt, cancellationToken);
+            progress?.Report(new AgentTurnProgress("Analyzing...", string.Empty, string.Empty));
+            hiddenReasoning = await RequestReasoningAsync(config, config.Models.Analysis, prompt, cancellationToken);
+            if (config.Models.AnalysisThinking)
+            {
+                visibleThinking = hiddenReasoning;
+                progress?.Report(new AgentTurnProgress("Analysis ready.", visibleThinking, string.Empty));
+            }
         }
         else if (config.Models.PrimaryThinking)
         {
-            thinking = await RequestReasoningAsync(config, primaryRoute, prompt, cancellationToken);
+            progress?.Report(new AgentTurnProgress("Thinking...", string.Empty, string.Empty));
+            hiddenReasoning = await RequestReasoningAsync(config, primaryRoute, prompt, cancellationToken);
+            visibleThinking = hiddenReasoning;
+            progress?.Report(new AgentTurnProgress("Reasoning ready.", visibleThinking, string.Empty));
         }
 
-        var answer = await RequestAnswerAsync(config, primaryRoute, prompt, thinking, cancellationToken);
-        return new AgentTurnResult(thinking, answer, string.Empty);
+        progress?.Report(new AgentTurnProgress("Generating answer...", visibleThinking, string.Empty));
+        var answer = await RequestAnswerAsync(config, primaryRoute, prompt, hiddenReasoning, cancellationToken);
+        progress?.Report(new AgentTurnProgress("Ready", visibleThinking, answer));
+        return new AgentTurnResult(visibleThinking, answer, string.Empty);
     }
 
     private async Task<string> RequestReasoningAsync(
@@ -84,6 +103,8 @@ public sealed class AgentChatService
         {
             throw new InvalidOperationException($"Model is missing for provider {provider.Name}.");
         }
+
+        StartupLogService.Info($"Running model request via {provider.Id}/{route.Model}.");
 
         return provider.Id switch
         {
@@ -220,3 +241,4 @@ public sealed class AgentChatService
 }
 
 public sealed record AgentTurnResult(string Thinking, string Answer, string Error);
+public sealed record AgentTurnProgress(string Status, string Thinking, string Answer);

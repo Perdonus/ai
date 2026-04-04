@@ -16,6 +16,30 @@
             <SolidColorBrush x:Key="ShellPanelBrush" Color="{StaticResource ShellPanelColor}" />
             <SolidColorBrush x:Key="ShellPanelEdgeBrush" Color="{StaticResource ShellPanelEdgeColor}" />
             <SolidColorBrush x:Key="ShellTextBrush" Color="{StaticResource ShellTextColor}" />
+            <SolidColorBrush x:Key="FocusVisualPrimaryBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="FocusVisualSecondaryBrush" Color="Transparent" />
+            <Style TargetType="Control">
+                <Setter Property="UseSystemFocusVisuals" Value="False" />
+            </Style>
+            <Style TargetType="Button">
+                <Setter Property="CornerRadius" Value="18" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="14,10" />
+                <Setter Property="Background" Value="#182230" />
+                <Setter Property="Foreground" Value="{StaticResource ShellTextBrush}" />
+            </Style>
+            <Style TargetType="TextBox">
+                <Setter Property="CornerRadius" Value="20" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Background" Value="#171F2B" />
+                <Setter Property="Foreground" Value="{StaticResource ShellTextBrush}" />
+            </Style>
+            <Style TargetType="ComboBox">
+                <Setter Property="CornerRadius" Value="18" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Background" Value="#171F2B" />
+                <Setter Property="Foreground" Value="{StaticResource ShellTextBrush}" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

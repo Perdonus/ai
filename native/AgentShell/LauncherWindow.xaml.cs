@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using AgentShell.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
@@ -30,7 +31,7 @@ public sealed partial class LauncherWindow : Window
 
             _visuals = new WindowVisualService(this, ShellPanel);
             _visuals.InitializeLauncherChrome();
-            _visuals.MoveTopRight(false);
+            _visuals.HideImmediately();
             StartupLogService.Info("Launcher visuals initialized.");
 
             GetAppWindow().Closing += AppWindow_Closing;
@@ -63,17 +64,17 @@ public sealed partial class LauncherWindow : Window
 
     public async Task ShowAnimatedAsync()
     {
+        if (_isVisible)
+        {
+            await FocusPromptAsync();
+            return;
+        }
+
         StartupLogService.Info("Showing launcher.");
         _ignoreNextDeactivation = true;
-        ShowWindow(WindowNative.GetWindowHandle(this), 5);
         await _visuals.AnimateAsync(show: true);
-        await Task.Delay(60);
-        await EnqueueOnUiAsync(() =>
-        {
-            _isVisible = true;
-            PromptBox.Focus(FocusState.Programmatic);
-            PromptBox.SelectAll();
-        });
+        _isVisible = true;
+        await FocusPromptAsync();
     }
 
     public void HideAnimated(bool immediate = false)
@@ -93,7 +94,7 @@ public sealed partial class LauncherWindow : Window
 
         if (immediate)
         {
-            _visuals.MoveTopRight(false);
+            _visuals.HideImmediately();
             return;
         }
 
@@ -108,25 +109,15 @@ public sealed partial class LauncherWindow : Window
             return;
         }
 
-        if (args.WindowActivationState == WindowActivationState.Deactivated)
+        if (args.WindowActivationState == WindowActivationState.Deactivated && !_isBusy && !HasConversationContent())
         {
             await Task.Delay(40);
-            if (!_isBusy)
-            {
-                HideAnimated();
-            }
+            HideAnimated();
         }
     }
 
     private async void PromptBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key == Windows.System.VirtualKey.RightControl)
-        {
-            HideAnimated();
-            e.Handled = true;
-            return;
-        }
-
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
             await SubmitPromptAsync();
@@ -177,8 +168,8 @@ public sealed partial class LauncherWindow : Window
 
         await EnqueueOnUiAsync(() =>
         {
+            BusyRing.IsActive = true;
             SendButton.IsEnabled = false;
-            PromptBox.IsEnabled = false;
             SetStatus("Thinking...");
             ThinkingPanel.Visibility = Visibility.Collapsed;
             AnswerPanel.Visibility = Visibility.Collapsed;
@@ -188,9 +179,32 @@ public sealed partial class LauncherWindow : Window
             AnswerText.Text = string.Empty;
         });
 
+        var progress = new Progress<AgentTurnProgress>(update =>
+        {
+            _ = EnqueueOnUiAsync(() =>
+            {
+                if (!string.IsNullOrWhiteSpace(update.Status))
+                {
+                    SetStatus(update.Status);
+                }
+
+                if (!string.IsNullOrWhiteSpace(update.Thinking))
+                {
+                    ThinkingText.Text = update.Thinking;
+                    ThinkingPanel.Visibility = Visibility.Visible;
+                }
+
+                if (!string.IsNullOrWhiteSpace(update.Answer))
+                {
+                    AnswerText.Text = update.Answer;
+                    AnswerPanel.Visibility = Visibility.Visible;
+                }
+            });
+        });
+
         try
         {
-            var result = await _chatService.RunAsync(App.ConfigService.Current, prompt, _promptCts.Token);
+            var result = await _chatService.RunAsync(App.ConfigService.Current, prompt, progress, _promptCts.Token);
             await EnqueueOnUiAsync(() =>
             {
                 if (!string.IsNullOrWhiteSpace(result.Error))
@@ -198,27 +212,23 @@ public sealed partial class LauncherWindow : Window
                     ErrorText.Text = result.Error;
                     ErrorText.Visibility = Visibility.Visible;
                     SetStatus("Request failed");
+                    return;
                 }
-                else
-                {
-                    if (!string.IsNullOrWhiteSpace(result.Thinking))
-                    {
-                        ThinkingText.Text = result.Thinking;
-                        ThinkingPanel.Visibility = Visibility.Visible;
-                    }
 
-                    AnswerText.Text = result.Answer;
-                    AnswerPanel.Visibility = Visibility.Visible;
-                    SetStatus("Ready");
+                if (!string.IsNullOrWhiteSpace(result.Thinking))
+                {
+                    ThinkingText.Text = result.Thinking;
+                    ThinkingPanel.Visibility = Visibility.Visible;
                 }
+
+                AnswerText.Text = result.Answer;
+                AnswerPanel.Visibility = Visibility.Visible;
+                SetStatus("Ready");
             });
         }
         catch (OperationCanceledException)
         {
-            await EnqueueOnUiAsync(() =>
-            {
-                SetStatus("Cancelled");
-            });
+            await EnqueueOnUiAsync(() => SetStatus("Cancelled"));
         }
         catch (Exception ex)
         {
@@ -235,16 +245,17 @@ public sealed partial class LauncherWindow : Window
             _isBusy = false;
             await EnqueueOnUiAsync(() =>
             {
+                BusyRing.IsActive = false;
                 SendButton.IsEnabled = true;
-                PromptBox.IsEnabled = true;
-                PromptBox.Focus(FocusState.Programmatic);
-                PromptBox.SelectAll();
             });
+
+            await FocusPromptAsync();
         }
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
+        StartupLogService.Info("Launcher requested settings.");
         App.ShowSettings();
     }
 
@@ -264,6 +275,34 @@ public sealed partial class LauncherWindow : Window
         });
     }
 
+    private async Task FocusPromptAsync()
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            await EnqueueOnUiAsync(() =>
+            {
+                Activate();
+                var hwnd = WindowNative.GetWindowHandle(this);
+                _ = ShowWindow(hwnd, SwShow);
+                _ = SetForegroundWindow(hwnd);
+                PromptBox.Focus(FocusState.Programmatic);
+                if (!string.IsNullOrWhiteSpace(PromptBox.Text))
+                {
+                    PromptBox.SelectAll();
+                }
+            });
+
+            await Task.Delay(70);
+        }
+    }
+
+    private bool HasConversationContent()
+    {
+        return !string.IsNullOrWhiteSpace(ThinkingText.Text) ||
+               !string.IsNullOrWhiteSpace(AnswerText.Text) ||
+               !string.IsNullOrWhiteSpace(ErrorText.Text);
+    }
+
     private void SetStatus(string text)
     {
         StatusText.Text = text;
@@ -271,6 +310,7 @@ public sealed partial class LauncherWindow : Window
 
     private void ResetOutput()
     {
+        BusyRing.IsActive = false;
         SetStatus("Ready");
         ThinkingText.Text = string.Empty;
         AnswerText.Text = string.Empty;
@@ -314,6 +354,11 @@ public sealed partial class LauncherWindow : Window
         return AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowNative.GetWindowHandle(this)));
     }
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private const int SwShow = 5;
+
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool ShowWindow(nint hWnd, int nCmdShow);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetForegroundWindow(nint hWnd);
 }

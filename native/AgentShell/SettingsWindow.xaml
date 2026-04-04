@@ -31,7 +31,7 @@
             <ScrollViewer x:Name="ProvidersView" Visibility="Visible">
                 <StackPanel Spacing="14">
                     <TextBlock Text="Провайдеры" FontSize="28" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock Text="Только API-ключи. Базовые URL провайдеров уже зашиты в приложение." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
+                    <TextBlock Text="Здесь только API-ключи. Базовые URL уже встроены в приложение." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
                     <ItemsControl x:Name="ProvidersList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="models:ProviderDescriptor">
@@ -59,26 +59,26 @@
                         <StackPanel Spacing="12">
                             <TextBlock Text="Основная модель" FontSize="18" Foreground="White" />
                             <ComboBox x:Name="PrimaryProviderCombo" SelectionChanged="PrimaryProviderCombo_SelectionChanged" />
-                            <ComboBox x:Name="PrimaryModelCombo" />
-                            <CheckBox x:Name="PrimaryThinkingToggle" Content="Показывать размышления основной модели" />
+                            <ComboBox x:Name="PrimaryModelCombo" SelectionChanged="ModelSelectionChanged" />
+                            <CheckBox x:Name="PrimaryThinkingToggle" Content="Показывать размышления основной модели" Checked="ModelSetting_Changed" Unchecked="ModelSetting_Changed" />
 
-                            <CheckBox x:Name="SeparateAnalysisToggle" Content="Отдельная модель анализа" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
+                            <CheckBox x:Name="SeparateAnalysisToggle" Content="Использовать отдельную модель анализа" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
                             <StackPanel x:Name="AnalysisPanel" Spacing="10">
                                 <ComboBox x:Name="AnalysisProviderCombo" SelectionChanged="AnalysisProviderCombo_SelectionChanged" />
-                                <ComboBox x:Name="AnalysisModelCombo" />
-                                <CheckBox x:Name="AnalysisThinkingToggle" Content="Показывать размышления модели анализа" />
+                                <ComboBox x:Name="AnalysisModelCombo" SelectionChanged="ModelSelectionChanged" />
+                                <CheckBox x:Name="AnalysisThinkingToggle" Content="Показывать размышления модели анализа" Checked="ModelSetting_Changed" Unchecked="ModelSetting_Changed" />
                             </StackPanel>
 
-                            <CheckBox x:Name="SeparateVisionToggle" Content="Отдельная vision-модель" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
+                            <CheckBox x:Name="SeparateVisionToggle" Content="Использовать отдельную vision-модель" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
                             <StackPanel x:Name="VisionPanel" Spacing="10">
                                 <ComboBox x:Name="VisionProviderCombo" SelectionChanged="VisionProviderCombo_SelectionChanged" />
-                                <ComboBox x:Name="VisionModelCombo" />
+                                <ComboBox x:Name="VisionModelCombo" SelectionChanged="ModelSelectionChanged" />
                             </StackPanel>
 
-                            <CheckBox x:Name="SeparateOcrToggle" Content="Отдельная OCR-модель" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
+                            <CheckBox x:Name="SeparateOcrToggle" Content="Использовать отдельную OCR-модель" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
                             <StackPanel x:Name="OcrPanel" Spacing="10">
                                 <ComboBox x:Name="OcrProviderCombo" SelectionChanged="OcrProviderCombo_SelectionChanged" />
-                                <ComboBox x:Name="OcrModelCombo" />
+                                <ComboBox x:Name="OcrModelCombo" SelectionChanged="ModelSelectionChanged" />
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -110,7 +110,7 @@
             <ScrollViewer x:Name="WidgetsView" Visibility="Collapsed">
                 <StackPanel Spacing="16">
                     <TextBlock Text="Виджеты" FontSize="28" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock Text="Виджеты могут принимать данные от агента, если это объявлено в их манифесте." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
+                    <TextBlock Text="Виджеты могут принимать данные от агента, если это указано в их манифесте." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
                     <ItemsControl x:Name="WidgetsList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="models:RuntimeItem">

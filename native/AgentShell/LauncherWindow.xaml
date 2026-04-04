@@ -9,15 +9,24 @@
         <Border
             x:Name="ShellPanel"
             Width="520"
-            Padding="20"
+            Padding="22"
             Background="#0B1118"
+            BorderBrush="Transparent"
             BorderThickness="0"
             CornerRadius="30">
             <Grid RowDefinitions="Auto,Auto,Auto">
-                <Grid ColumnDefinitions="*,Auto">
-                    <StackPanel>
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                    <ProgressRing
+                        x:Name="BusyRing"
+                        Width="18"
+                        Height="18"
+                        Margin="0,2,10,0"
+                        IsActive="False"
+                        Foreground="{StaticResource ShellAccentBrush}"
+                        VerticalAlignment="Top" />
+                    <StackPanel Grid.Column="1">
                         <TextBlock
-                            Text="Agent"
+                            Text="AI Agent"
                             Foreground="{StaticResource ShellAccentBrush}"
                             FontSize="13"
                             FontWeight="SemiBold"
@@ -31,18 +40,17 @@
                     </StackPanel>
                     <Button
                         x:Name="SettingsButton"
-                        Grid.Column="1"
-                        Width="30"
-                        Height="30"
+                        Grid.Column="2"
+                        Width="34"
+                        Height="34"
                         Padding="0"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Top"
+                        FontFamily="Segoe Fluent Icons"
                         FontSize="14"
-                        Content="⚙"
+                        Content="&#xE713;"
                         Background="#17202C"
                         Foreground="{StaticResource ShellTextBrush}"
-                        BorderThickness="0"
-                        CornerRadius="15"
                         Click="SettingsButton_Click" />
                 </Grid>
 
@@ -51,6 +59,7 @@
                     Margin="0,16,0,0"
                     Padding="14"
                     Background="#111925"
+                    BorderBrush="Transparent"
                     BorderThickness="0"
                     CornerRadius="22">
                     <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto">
@@ -97,10 +106,6 @@
                         Padding="14,0"
                         PlaceholderText="Напиши действие"
                         FontSize="18"
-                        Background="#171F2B"
-                        BorderThickness="0"
-                        Foreground="{StaticResource ShellTextBrush}"
-                        CornerRadius="20"
                         KeyDown="PromptBox_KeyDown" />
                     <Button
                         x:Name="SendButton"
@@ -108,12 +113,11 @@
                         Width="44"
                         Height="44"
                         Padding="0"
-                        FontSize="18"
-                        Content="→"
+                        FontFamily="Segoe Fluent Icons"
+                        FontSize="16"
+                        Content="&#xE122;"
                         Background="{StaticResource ShellAccentBrush}"
                         Foreground="#081018"
-                        BorderThickness="0"
-                        CornerRadius="22"
                         Click="SendButton_Click" />
                 </Grid>
             </Grid>
