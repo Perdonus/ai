@@ -10,11 +10,11 @@ namespace AgentShell;
 
 public sealed partial class LauncherWindow : Window
 {
-    private readonly AgentChatService _chatService = new();
-    private readonly DesktopActionService _desktopActions = new();
+    private readonly AgentLoopService _agentLoop = new();
     private readonly GlobalHotkeyService _hotkey;
     private readonly WindowVisualService _visuals;
     private readonly DispatcherQueue _dispatcherQueue;
+    private readonly AgentSessionState _session = new();
     private CancellationTokenSource? _promptCts;
     private bool _isBusy;
     private bool _isVisible;
@@ -42,7 +42,7 @@ public sealed partial class LauncherWindow : Window
             StartupLogService.Info("Global hotkey registered for Right Ctrl.");
 
             Activated += LauncherWindow_Activated;
-            ResetOutput();
+            ResetSessionUi();
         }
         catch (Exception ex)
         {
@@ -71,15 +71,7 @@ public sealed partial class LauncherWindow : Window
             return;
         }
 
-        if (HasConversationContent())
-        {
-            ApplyExpandedState(true);
-        }
-        else
-        {
-            ApplyExpandedState(false);
-        }
-
+        ApplyExpandedState(HasConversationContent());
         StartupLogService.Info("Showing launcher.");
         _ignoreNextDeactivation = true;
         await _visuals.AnimateAsync(show: true);
@@ -100,7 +92,16 @@ public sealed partial class LauncherWindow : Window
 
     private async Task HideInternalAsync(bool immediate)
     {
+        _promptCts?.Cancel();
+        _isBusy = false;
         _isVisible = false;
+        _session.Reset();
+
+        await EnqueueOnUiAsync(() =>
+        {
+            PromptBox.Text = string.Empty;
+            ResetSessionUi();
+        });
 
         if (immediate)
         {
@@ -187,74 +188,50 @@ public sealed partial class LauncherWindow : Window
             AnswerPanel.Visibility = Visibility.Collapsed;
             ErrorText.Visibility = Visibility.Collapsed;
             ErrorText.Text = string.Empty;
-            AnswerText.Text = string.Empty;
             ApplyExpandedState(true);
-            SetStatus("Thinking...");
+            SetStatus("Агент работает...");
+        });
+
+        var progress = new Progress<AgentLoopProgress>(update =>
+        {
+            _ = EnqueueOnUiAsync(() =>
+            {
+                OutputContainer.Visibility = Visibility.Visible;
+                ApplyExpandedState(true);
+                SetStatus(update.Status);
+
+                if (!string.IsNullOrWhiteSpace(update.Thinking))
+                {
+                    ThinkingText.Text = update.Thinking;
+                    ThinkingPanel.Visibility = Visibility.Visible;
+                }
+
+                if (!string.IsNullOrWhiteSpace(update.Answer))
+                {
+                    AnswerText.Text = update.Answer;
+                    AnswerPanel.Visibility = Visibility.Visible;
+                }
+            });
         });
 
         try
         {
-            var localAction = await _desktopActions.TryHandleAsync(prompt, _promptCts.Token);
-            if (localAction is not null)
-            {
-                await EnqueueOnUiAsync(() =>
-                {
-                    ThinkingText.Text = "Локальное действие выполнено.";
-                    ThinkingPanel.Visibility = Visibility.Visible;
-                    AnswerText.Text = localAction.Message;
-                    AnswerPanel.Visibility = Visibility.Visible;
-                    SetStatus("Ready");
-                });
-
-                return;
-            }
-
-            var progress = new Progress<AgentTurnProgress>(update =>
-            {
-                _ = EnqueueOnUiAsync(() =>
-                {
-                    OutputContainer.Visibility = Visibility.Visible;
-                    ApplyExpandedState(true);
-
-                    if (!string.IsNullOrWhiteSpace(update.Status))
-                    {
-                        SetStatus(update.Status);
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(update.Thinking))
-                    {
-                        ThinkingText.Text = update.Thinking;
-                        ThinkingPanel.Visibility = Visibility.Visible;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(update.Answer))
-                    {
-                        AnswerText.Text = update.Answer;
-                        AnswerPanel.Visibility = Visibility.Visible;
-                    }
-                });
-            });
-
-            var result = await _chatService.RunAsync(App.ConfigService.Current, prompt, progress, _promptCts.Token);
+            var result = await _agentLoop.RunAsync(App.ConfigService.Current, _session, prompt, progress, _promptCts.Token);
             await EnqueueOnUiAsync(() =>
             {
                 if (!string.IsNullOrWhiteSpace(result.Error))
                 {
                     ErrorText.Text = result.Error;
                     ErrorText.Visibility = Visibility.Visible;
-                    SetStatus("Request failed");
+                    SetStatus("Ошибка");
                     return;
                 }
 
-                if (!string.IsNullOrWhiteSpace(result.Thinking))
-                {
-                    ThinkingText.Text = result.Thinking;
-                    ThinkingPanel.Visibility = Visibility.Visible;
-                }
-
+                ThinkingText.Text = result.Thinking;
+                ThinkingPanel.Visibility = string.IsNullOrWhiteSpace(result.Thinking) ? Visibility.Collapsed : Visibility.Visible;
                 AnswerText.Text = result.Answer;
-                AnswerPanel.Visibility = Visibility.Visible;
-                SetStatus("Ready");
+                AnswerPanel.Visibility = string.IsNullOrWhiteSpace(result.Answer) ? Visibility.Collapsed : Visibility.Visible;
+                SetStatus("Готово");
             });
         }
         catch (OperationCanceledException)
@@ -268,8 +245,7 @@ public sealed partial class LauncherWindow : Window
             {
                 ErrorText.Text = ex.Message;
                 ErrorText.Visibility = Visibility.Visible;
-                ThinkingPanel.Visibility = Visibility.Collapsed;
-                SetStatus("Request failed");
+                SetStatus("Ошибка");
             });
         }
         finally
@@ -279,10 +255,6 @@ public sealed partial class LauncherWindow : Window
             {
                 BusyRing.IsActive = false;
                 BusyRing.Visibility = Visibility.Collapsed;
-                if (string.IsNullOrWhiteSpace(ThinkingText.Text))
-                {
-                    ThinkingPanel.Visibility = Visibility.Collapsed;
-                }
             });
 
             await FocusPromptAsync();
@@ -343,16 +315,11 @@ public sealed partial class LauncherWindow : Window
                !string.IsNullOrWhiteSpace(ErrorText.Text);
     }
 
-    private void SetStatus(string text)
-    {
-        StatusText.Text = text;
-    }
-
-    private void ResetOutput()
+    private void ResetSessionUi()
     {
         BusyRing.IsActive = false;
         BusyRing.Visibility = Visibility.Collapsed;
-        SetStatus("Ready");
+        SetStatus(string.Empty);
         ThinkingText.Text = string.Empty;
         AnswerText.Text = string.Empty;
         ErrorText.Text = string.Empty;
@@ -360,6 +327,11 @@ public sealed partial class LauncherWindow : Window
         AnswerPanel.Visibility = Visibility.Collapsed;
         ErrorText.Visibility = Visibility.Collapsed;
         ApplyExpandedState(false);
+    }
+
+    private void SetStatus(string text)
+    {
+        StatusText.Text = text;
     }
 
     private Task EnqueueOnUiAsync(Action action)

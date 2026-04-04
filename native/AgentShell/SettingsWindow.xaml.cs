@@ -187,14 +187,14 @@ public sealed partial class SettingsWindow : Window
     {
         SyncModelSettings();
         var path = await _config.CreateBackupSnapshotAsync();
-        OperationStatusText.Text = $"Бэкап создан: {path}";
+        await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Бэкап создан: {path}");
     }
 
     private async void ExportButton_Click(object sender, RoutedEventArgs e)
     {
         SyncModelSettings();
         var path = await _config.ExportAsync();
-        OperationStatusText.Text = $"Экспорт создан: {path}";
+        await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Экспорт создан: {path}");
     }
 
     private async void RestoreButton_Click(object sender, RoutedEventArgs e)
@@ -202,11 +202,11 @@ public sealed partial class SettingsWindow : Window
         var path = await _config.RestoreLatestBackupAsync();
         if (string.IsNullOrWhiteSpace(path))
         {
-            OperationStatusText.Text = "Бэкапы не найдены.";
+            await EnqueueOnUiAsync(() => OperationStatusText.Text = "Бэкапы не найдены.");
             return;
         }
 
-        OperationStatusText.Text = $"Восстановлено: {path}";
+        await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Восстановлено: {path}");
         await LoadSafeAsync();
     }
 
@@ -360,13 +360,21 @@ public sealed partial class SettingsWindow : Window
         Directory.Delete(path, true);
         if (isWidget)
         {
-            WidgetsList.ItemsSource = await _runtimeCatalog.LoadWidgetsAsync();
-            OperationStatusText.Text = "Виджет удален.";
+            var widgets = await _runtimeCatalog.LoadWidgetsAsync();
+            await EnqueueOnUiAsync(() =>
+            {
+                WidgetsList.ItemsSource = widgets;
+                OperationStatusText.Text = "Виджет удален.";
+            });
         }
         else
         {
-            ToolsList.ItemsSource = await _runtimeCatalog.LoadToolsAsync();
-            OperationStatusText.Text = "Тулз удален.";
+            var tools = await _runtimeCatalog.LoadToolsAsync();
+            await EnqueueOnUiAsync(() =>
+            {
+                ToolsList.ItemsSource = tools;
+                OperationStatusText.Text = "Тулз удален.";
+            });
         }
     }
 
@@ -374,7 +382,7 @@ public sealed partial class SettingsWindow : Window
     {
         SyncModelSettings();
         await _config.SaveAsync();
-        OperationStatusText.Text = statusText;
+        await EnqueueOnUiAsync(() => OperationStatusText.Text = statusText);
     }
 
     private void SyncModelSettings()

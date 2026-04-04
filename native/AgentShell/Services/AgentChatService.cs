@@ -12,88 +12,68 @@ public sealed class AgentChatService
         Timeout = TimeSpan.FromSeconds(90)
     };
 
-    public async Task<AgentTurnResult> RunAsync(
-        ShellConfig config,
-        string prompt,
-        IProgress<AgentTurnProgress>? progress,
-        CancellationToken cancellationToken)
+    public ModelRoute ResolveVisionRoute(ShellConfig config)
     {
-        var primaryRoute = config.Models.Primary;
-        if (string.IsNullOrWhiteSpace(primaryRoute.Model))
-        {
-            return new AgentTurnResult(string.Empty, string.Empty, "Select a primary model first.");
-        }
-
-        progress?.Report(new AgentTurnProgress("Preparing request...", string.Empty, string.Empty));
-
-        var visibleThinking = string.Empty;
-        var hiddenReasoning = string.Empty;
-
-        if (config.Models.UseSeparateAnalysis && !string.IsNullOrWhiteSpace(config.Models.Analysis.Model))
-        {
-            progress?.Report(new AgentTurnProgress("Analyzing...", string.Empty, string.Empty));
-            hiddenReasoning = await RequestReasoningAsync(config, config.Models.Analysis, prompt, cancellationToken);
-            if (config.Models.AnalysisThinking)
-            {
-                visibleThinking = hiddenReasoning;
-                progress?.Report(new AgentTurnProgress("Analysis ready.", visibleThinking, string.Empty));
-            }
-        }
-        else if (config.Models.PrimaryThinking)
-        {
-            progress?.Report(new AgentTurnProgress("Thinking...", string.Empty, string.Empty));
-            hiddenReasoning = await RequestReasoningAsync(config, primaryRoute, prompt, cancellationToken);
-            visibleThinking = hiddenReasoning;
-            progress?.Report(new AgentTurnProgress("Reasoning ready.", visibleThinking, string.Empty));
-        }
-
-        progress?.Report(new AgentTurnProgress("Generating answer...", visibleThinking, string.Empty));
-        var answer = await RequestAnswerAsync(config, primaryRoute, prompt, hiddenReasoning, cancellationToken);
-        progress?.Report(new AgentTurnProgress("Ready", visibleThinking, answer));
-        return new AgentTurnResult(visibleThinking, answer, string.Empty);
+        return config.Models.UseSeparateVision && !string.IsNullOrWhiteSpace(config.Models.Vision.Model)
+            ? config.Models.Vision
+            : config.Models.Primary;
     }
 
-    private async Task<string> RequestReasoningAsync(
-        ShellConfig config,
-        ModelRoute route,
-        string prompt,
-        CancellationToken cancellationToken)
+    public ModelRoute? ResolveAnalysisRoute(ShellConfig config)
     {
-        var systemPrompt =
-            "You are the reasoning engine for a desktop AI assistant. Think clearly and briefly. " +
-            "Return only short plain-text reasoning notes in Russian, no markdown, no XML, no code fences.";
-        return await RequestTextAsync(config, route, systemPrompt, prompt, cancellationToken);
+        return config.Models.UseSeparateAnalysis && !string.IsNullOrWhiteSpace(config.Models.Analysis.Model)
+            ? config.Models.Analysis
+            : null;
     }
 
-    private async Task<string> RequestAnswerAsync(
-        ShellConfig config,
-        ModelRoute route,
-        string prompt,
-        string thinking,
-        CancellationToken cancellationToken)
-    {
-        var systemPrompt =
-            "You are a concise desktop AI assistant. Answer in Russian unless the user explicitly asks otherwise. " +
-            "Be practical and direct.";
+    public bool ShouldShowPrimaryThinking(ShellConfig config) => config.Models.PrimaryThinking;
 
-        var userPrompt = string.IsNullOrWhiteSpace(thinking)
-            ? prompt
-            : $"User request:\n{prompt}\n\nReasoning notes:\n{thinking}\n\nUse the reasoning notes to produce the final answer.";
+    public bool ShouldShowAnalysisThinking(ShellConfig config) => config.Models.AnalysisThinking;
 
-        return await RequestTextAsync(config, route, systemPrompt, userPrompt, cancellationToken);
-    }
-
-    private async Task<string> RequestTextAsync(
+    public async Task<string> RequestTextAsync(
         ShellConfig config,
         ModelRoute route,
         string systemPrompt,
         string userPrompt,
         CancellationToken cancellationToken)
     {
+        var provider = ResolveProvider(route, config, out var apiKey);
+        StartupLogService.Info($"Running model request via {provider.Id}/{route.Model}.");
+
+        return provider.Id switch
+        {
+            "gemini" => await RequestGeminiAsync(provider, route.Model, apiKey, systemPrompt, userPrompt, null, cancellationToken),
+            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", route.Model, apiKey, systemPrompt, userPrompt, null, expectJson: false, cancellationToken),
+            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, route.Model, apiKey, systemPrompt, userPrompt, null, expectJson: false, cancellationToken)
+        };
+    }
+
+    public async Task<string> RequestVisionJsonAsync(
+        ShellConfig config,
+        ModelRoute route,
+        string systemPrompt,
+        string userPrompt,
+        ScreenSnapshot screenshot,
+        CancellationToken cancellationToken)
+    {
+        var provider = ResolveProvider(route, config, out var apiKey);
+        StartupLogService.Info($"Running agent step via {provider.Id}/{route.Model}.");
+        var raw = provider.Id switch
+        {
+            "gemini" => await RequestGeminiAsync(provider, route.Model, apiKey, systemPrompt, userPrompt, screenshot, cancellationToken),
+            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", route.Model, apiKey, systemPrompt, userPrompt, screenshot, expectJson: true, cancellationToken),
+            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, route.Model, apiKey, systemPrompt, userPrompt, screenshot, expectJson: true, cancellationToken)
+        };
+
+        return ExtractJsonObject(raw);
+    }
+
+    private ProviderDescriptor ResolveProvider(ModelRoute route, ShellConfig config, out string apiKey)
+    {
         var provider = ProviderCatalog.All.FirstOrDefault(item => item.Id == route.Provider)
             ?? throw new InvalidOperationException($"Unknown provider: {route.Provider}");
 
-        var apiKey = config.Providers.GetValueOrDefault(provider.Id)?.ApiKey ?? string.Empty;
+        apiKey = config.Providers.GetValueOrDefault(provider.Id)?.ApiKey ?? string.Empty;
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException($"API key is missing for provider {provider.Name}.");
@@ -104,14 +84,7 @@ public sealed class AgentChatService
             throw new InvalidOperationException($"Model is missing for provider {provider.Name}.");
         }
 
-        StartupLogService.Info($"Running model request via {provider.Id}/{route.Model}.");
-
-        return provider.Id switch
-        {
-            "gemini" => await RequestGeminiAsync(provider, route.Model, apiKey, systemPrompt, userPrompt, cancellationToken),
-            "huggingface" => await RequestOpenAiCompatibleAsync("https://router.huggingface.co/v1", route.Model, apiKey, systemPrompt, userPrompt, cancellationToken),
-            _ => await RequestOpenAiCompatibleAsync(provider.BaseUrl, route.Model, apiKey, systemPrompt, userPrompt, cancellationToken)
-        };
+        return provider;
     }
 
     private async Task<string> RequestOpenAiCompatibleAsync(
@@ -120,19 +93,30 @@ public sealed class AgentChatService
         string apiKey,
         string systemPrompt,
         string userPrompt,
+        ScreenSnapshot? screenshot,
+        bool expectJson,
         CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl.TrimEnd('/')}/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+        object userContent = screenshot is null
+            ? userPrompt
+            : new object[]
+            {
+                new { type = "text", text = userPrompt },
+                new { type = "image_url", image_url = new { url = $"data:image/png;base64,{screenshot.PngBase64}" } }
+            };
+
         request.Content = new StringContent(
             JsonSerializer.Serialize(new
             {
                 model,
-                temperature = 0.3,
+                temperature = 0.2,
                 messages = new object[]
                 {
                     new { role = "system", content = systemPrompt },
-                    new { role = "user", content = userPrompt }
+                    new { role = "user", content = userContent }
                 }
             }),
             Encoding.UTF8,
@@ -161,10 +145,27 @@ public sealed class AgentChatService
         string apiKey,
         string systemPrompt,
         string userPrompt,
+        ScreenSnapshot? screenshot,
         CancellationToken cancellationToken)
     {
         var url = $"{provider.BaseUrl.TrimEnd('/')}/models/{Uri.EscapeDataString(model)}:generateContent?key={Uri.EscapeDataString(apiKey)}";
-        var fullPrompt = $"{systemPrompt}\n\nUser request:\n{userPrompt}";
+        var parts = new List<object>
+        {
+            new { text = $"{systemPrompt}\n\n{userPrompt}" }
+        };
+
+        if (screenshot is not null)
+        {
+            parts.Add(new
+            {
+                inlineData = new
+                {
+                    mimeType = "image/png",
+                    data = screenshot.PngBase64
+                }
+            });
+        }
+
         using var request = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = new StringContent(
@@ -175,15 +176,12 @@ public sealed class AgentChatService
                         new
                         {
                             role = "user",
-                            parts = new object[]
-                            {
-                                new { text = fullPrompt }
-                            }
+                            parts = parts
                         }
                     },
                     generationConfig = new
                     {
-                        temperature = 0.3
+                        temperature = 0.2
                     }
                 }),
                 Encoding.UTF8,
@@ -204,15 +202,15 @@ public sealed class AgentChatService
         }
 
         if (!candidates[0].TryGetProperty("content", out var content) ||
-            !content.TryGetProperty("parts", out var parts) ||
-            parts.ValueKind != JsonValueKind.Array)
+            !content.TryGetProperty("parts", out var responseParts) ||
+            responseParts.ValueKind != JsonValueKind.Array)
         {
             throw new InvalidOperationException("Gemini response does not contain content parts.");
         }
 
         return string.Join(
             "\n",
-            parts.EnumerateArray()
+            responseParts.EnumerateArray()
                 .Select(part => part.TryGetProperty("text", out var text) ? text.GetString() : null)
                 .OfType<string>());
     }
@@ -238,7 +236,21 @@ public sealed class AgentChatService
             _ => string.Empty
         };
     }
-}
 
-public sealed record AgentTurnResult(string Thinking, string Answer, string Error);
-public sealed record AgentTurnProgress(string Status, string Thinking, string Answer);
+    private static string ExtractJsonObject(string raw)
+    {
+        var trimmed = raw.Trim();
+        var fenced = trimmed.Replace("```json", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("```", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Trim();
+
+        var start = fenced.IndexOf('{');
+        var end = fenced.LastIndexOf('}');
+        if (start < 0 || end <= start)
+        {
+            throw new InvalidOperationException($"Model did not return JSON: {raw}");
+        }
+
+        return fenced[start..(end + 1)];
+    }
+}

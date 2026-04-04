@@ -5,55 +5,78 @@ namespace AgentShell.Services;
 
 public sealed class DesktopActionService
 {
+    private readonly InputAutomationService _input = new();
+
     private static readonly IReadOnlyDictionary<string, string> KnownTargets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        ["блокнот"] = "notepad.exe",
-        ["notepad"] = "notepad.exe",
-        ["калькулятор"] = "calc.exe",
-        ["calc"] = "calc.exe",
-        ["терминал"] = "wt.exe",
-        ["terminal"] = "wt.exe",
-        ["powershell"] = "powershell.exe",
-        ["командную строку"] = "cmd.exe",
-        ["cmd"] = "cmd.exe",
-        ["paint"] = "mspaint.exe",
-        ["паинт"] = "mspaint.exe",
-        ["браузер"] = "msedge.exe",
-        ["browser"] = "msedge.exe",
-        ["edge"] = "msedge.exe",
-        ["chrome"] = "chrome.exe"
+        ["блокнот"] = "notepad",
+        ["notepad"] = "notepad",
+        ["калькулятор"] = "calc",
+        ["calc"] = "calc",
+        ["терминал"] = "wt",
+        ["terminal"] = "wt",
+        ["powershell"] = "powershell",
+        ["командную строку"] = "cmd",
+        ["cmd"] = "cmd",
+        ["paint"] = "mspaint",
+        ["паинт"] = "mspaint",
+        ["браузер"] = "msedge",
+        ["browser"] = "msedge",
+        ["edge"] = "msedge",
+        ["chrome"] = "chrome"
     };
 
-    public Task<DesktopActionResult?> TryHandleAsync(string prompt, CancellationToken cancellationToken)
+    public async Task<DesktopActionResult?> TryHandleAsync(string prompt, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var normalized = prompt.Trim().ToLowerInvariant();
         if (!ContainsActionVerb(normalized))
         {
-            return Task.FromResult<DesktopActionResult?>(null);
+            return null;
         }
 
         foreach (var pair in KnownTargets)
         {
             if (normalized.Contains(pair.Key, StringComparison.OrdinalIgnoreCase))
             {
-                return Task.FromResult<DesktopActionResult?>(Launch(pair.Value, $"Открыл {pair.Key}."));
+                await OpenAppVisualAsync(pair.Value, cancellationToken);
+                return new DesktopActionResult($"Открыл {pair.Key}.");
             }
         }
 
         var urlMatch = Regex.Match(prompt, @"https?://\S+", RegexOptions.IgnoreCase);
         if (urlMatch.Success)
         {
-            return Task.FromResult<DesktopActionResult?>(Launch(urlMatch.Value, $"Открыл {urlMatch.Value}."));
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = urlMatch.Value,
+                UseShellExecute = true
+            });
+            return new DesktopActionResult($"Открыл {urlMatch.Value}.");
         }
 
         var pathMatch = Regex.Match(prompt, "[A-Za-z]:\\\\[^\\r\\n\"]+");
         if (pathMatch.Success && (File.Exists(pathMatch.Value) || Directory.Exists(pathMatch.Value)))
         {
-            return Task.FromResult<DesktopActionResult?>(Launch(pathMatch.Value, $"Открыл {pathMatch.Value}."));
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = pathMatch.Value,
+                UseShellExecute = true
+            });
+            return new DesktopActionResult($"Открыл {pathMatch.Value}.");
         }
 
-        return Task.FromResult<DesktopActionResult?>(null);
+        return null;
+    }
+
+    public async Task OpenAppVisualAsync(string target, CancellationToken cancellationToken)
+    {
+        StartupLogService.Info($"Running visual desktop action for target: {target}");
+        _input.PressKeyCombo(["WIN", "R"]);
+        await _input.WaitAsync(300, cancellationToken);
+        _input.TypeText(target);
+        await _input.WaitAsync(120, cancellationToken);
+        _input.PressKey("ENTER");
     }
 
     private static bool ContainsActionVerb(string normalized)
@@ -62,18 +85,6 @@ public sealed class DesktopActionService
                normalized.Contains("open ", StringComparison.OrdinalIgnoreCase) ||
                normalized.Contains("launch ", StringComparison.OrdinalIgnoreCase) ||
                normalized.Contains("запусти", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static DesktopActionResult Launch(string target, string successMessage)
-    {
-        StartupLogService.Info($"Running local desktop action for target: {target}");
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = target,
-            UseShellExecute = true
-        });
-
-        return new DesktopActionResult(successMessage);
     }
 }
 
