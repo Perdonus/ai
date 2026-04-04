@@ -40,7 +40,7 @@ public partial class App : Application
 
             try
             {
-                _trayIcon = new TrayIconService(Launcher, OpenLauncher, Launcher.HotkeyService);
+                _trayIcon = new TrayIconService(Launcher, OpenLauncher, ShowSettings, ExitAgent, Launcher.HotkeyService);
                 StartupLogService.Info("Tray icon created.");
             }
             catch (Exception ex)
@@ -88,6 +88,22 @@ public partial class App : Application
         }
 
         Launcher.DispatcherQueue.TryEnqueue(async () => await Launcher.ShowAnimatedAsync());
+    }
+
+    public void ExitAgent()
+    {
+        try
+        {
+            StartupLogService.Info("Exit requested from tray.");
+            _trayIcon?.Dispose();
+            _trayIcon = null;
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Warn($"Tray dispose during exit failed: {ex.Message}");
+        }
+
+        Current.Exit();
     }
 
     private void App_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)

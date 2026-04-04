@@ -17,35 +17,19 @@
             CornerRadius="30"
             HorizontalAlignment="Stretch">
             <Grid RowDefinitions="Auto,Auto">
-                <Grid ColumnDefinitions="*,Auto">
-                    <TextBox
-                        x:Name="PromptBox"
-                        Height="46"
-                        Padding="16,0"
-                        automation:AutomationProperties.AutomationId="PromptBox"
-                        PlaceholderText="Напиши действие"
-                        FontSize="17"
-                        Background="#121A25"
-                        BorderBrush="Transparent"
-                        BorderThickness="0"
-                        CornerRadius="23"
-                        Foreground="{StaticResource ShellTextBrush}"
-                        KeyDown="PromptBox_KeyDown" />
-                    <Button
-                        x:Name="SettingsButton"
-                        Grid.Column="1"
-                        Width="46"
-                        Height="46"
-                        Margin="10,0,0,0"
-                        Padding="0"
-                        automation:AutomationProperties.AutomationId="SettingsButton"
-                        FontFamily="Segoe Fluent Icons"
-                        FontSize="15"
-                        Content="&#xE713;"
-                        Background="#121A25"
-                        Foreground="{StaticResource ShellTextBrush}"
-                        Click="SettingsButton_Click" />
-                </Grid>
+                <TextBox
+                    x:Name="PromptBox"
+                    Height="46"
+                    Padding="16,0"
+                    automation:AutomationProperties.AutomationId="PromptBox"
+                    PlaceholderText="Напиши действие"
+                    FontSize="17"
+                    Background="#121A25"
+                    BorderBrush="Transparent"
+                    BorderThickness="0"
+                    CornerRadius="23"
+                    Foreground="{StaticResource ShellTextBrush}"
+                    KeyDown="PromptBox_KeyDown" />
 
                 <Border
                     x:Name="ConversationContainer"

@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using AgentShell.Models;
@@ -7,6 +8,13 @@ namespace AgentShell.Services;
 
 public sealed class AgentChatService
 {
+    private static readonly TimeSpan[] RetryDelays =
+    [
+        TimeSpan.FromSeconds(4),
+        TimeSpan.FromSeconds(8),
+        TimeSpan.FromSeconds(16)
+    ];
+
     private readonly HttpClient _httpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(90)
@@ -127,9 +135,6 @@ public sealed class AgentChatService
         ScreenSnapshot? screenshot,
         CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl.TrimEnd('/')}/chat/completions");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-
         object userContent = screenshot is null
             ? userPrompt
             : new object[]
@@ -138,26 +143,28 @@ public sealed class AgentChatService
                 new { type = "image_url", image_url = new { url = $"data:image/png;base64,{screenshot.PngBase64}" } }
             };
 
-        request.Content = new StringContent(
-            JsonSerializer.Serialize(new
+        var body = await SendRequestWithBackoffAsync(
+            () =>
             {
-                model,
-                temperature = 0.2,
-                messages = new object[]
-                {
-                    new { role = "system", content = systemPrompt },
-                    new { role = "user", content = userContent }
-                }
-            }),
-            Encoding.UTF8,
-            "application/json");
-
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException($"Provider request failed: {(int)response.StatusCode} {body}");
-        }
+                var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl.TrimEnd('/')}/chat/completions");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                request.Content = new StringContent(
+                    JsonSerializer.Serialize(new
+                    {
+                        model,
+                        temperature = 0.2,
+                        messages = new object[]
+                        {
+                            new { role = "system", content = systemPrompt },
+                            new { role = "user", content = userContent }
+                        }
+                    }),
+                    Encoding.UTF8,
+                    "application/json");
+                return request;
+            },
+            $"{baseUrl.TrimEnd('/')}/chat/completions",
+            cancellationToken);
 
         using var document = JsonDocument.Parse(body);
         if (!document.RootElement.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0)
@@ -196,34 +203,30 @@ public sealed class AgentChatService
             });
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, url)
-        {
-            Content = new StringContent(
-                JsonSerializer.Serialize(new
-                {
-                    contents = new object[]
+        var body = await SendRequestWithBackoffAsync(
+            () => new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new
                     {
-                        new
+                        contents = new object[]
                         {
-                            role = "user",
-                            parts
+                            new
+                            {
+                                role = "user",
+                                parts
+                            }
+                        },
+                        generationConfig = new
+                        {
+                            temperature = 0.2
                         }
-                    },
-                    generationConfig = new
-                    {
-                        temperature = 0.2
-                    }
-                }),
-                Encoding.UTF8,
-                "application/json")
-        };
-
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException($"Gemini request failed: {(int)response.StatusCode} {body}");
-        }
+                    }),
+                    Encoding.UTF8,
+                    "application/json")
+            },
+            url,
+            cancellationToken);
 
         using var document = JsonDocument.Parse(body);
         if (!document.RootElement.TryGetProperty("candidates", out var candidates) || candidates.ValueKind != JsonValueKind.Array || candidates.GetArrayLength() == 0)
@@ -243,6 +246,79 @@ public sealed class AgentChatService
             responseParts.EnumerateArray()
                 .Select(part => part.TryGetProperty("text", out var text) ? text.GetString() : null)
                 .OfType<string>());
+    }
+
+    private async Task<string> SendRequestWithBackoffAsync(
+        Func<HttpRequestMessage> requestFactory,
+        string endpointLabel,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt <= RetryDelays.Length; attempt++)
+        {
+            using var request = requestFactory();
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                return body;
+            }
+
+            if (attempt < RetryDelays.Length && IsRetryable(response.StatusCode))
+            {
+                var delay = GetRetryDelay(response, attempt);
+                StartupLogService.Warn(
+                    $"Provider throttled or failed temporarily on {endpointLabel}. status={(int)response.StatusCode}. retry_in={delay.TotalSeconds:0}s. attempt={attempt + 1}");
+                await Task.Delay(delay, cancellationToken);
+                continue;
+            }
+
+            var prefix = response.StatusCode == HttpStatusCode.TooManyRequests
+                ? "Provider request hit rate limit"
+                : "Provider request failed";
+            throw new InvalidOperationException($"{prefix}: {(int)response.StatusCode} {body}");
+        }
+
+        throw new InvalidOperationException("Provider request retry loop ended unexpectedly.");
+    }
+
+    private static bool IsRetryable(HttpStatusCode statusCode)
+    {
+        var numeric = (int)statusCode;
+        return statusCode == HttpStatusCode.TooManyRequests ||
+               statusCode == HttpStatusCode.RequestTimeout ||
+               numeric >= 500;
+    }
+
+    private static TimeSpan GetRetryDelay(HttpResponseMessage response, int attempt)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter?.Delta is { } delta && delta > TimeSpan.Zero)
+        {
+            return ClampDelay(delta);
+        }
+
+        if (retryAfter?.Date is { } retryDate)
+        {
+            var candidate = retryDate - DateTimeOffset.UtcNow;
+            if (candidate > TimeSpan.Zero)
+            {
+                return ClampDelay(candidate);
+            }
+        }
+
+        return RetryDelays[Math.Min(attempt, RetryDelays.Length - 1)];
+    }
+
+    private static TimeSpan ClampDelay(TimeSpan delay)
+    {
+        if (delay < TimeSpan.FromSeconds(2))
+        {
+            return TimeSpan.FromSeconds(2);
+        }
+
+        return delay > TimeSpan.FromSeconds(30)
+            ? TimeSpan.FromSeconds(30)
+            : delay;
     }
 
     private static string ParseContent(JsonElement content)

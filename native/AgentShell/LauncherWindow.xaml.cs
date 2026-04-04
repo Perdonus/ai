@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using WinRT.Interop;
+using Windows.System;
 
 namespace AgentShell;
 
@@ -136,7 +137,7 @@ public sealed partial class LauncherWindow : Window
             return;
         }
 
-        if (args.WindowActivationState == WindowActivationState.Deactivated && !_isBusy && !HasConversationContent())
+        if (args.WindowActivationState == WindowActivationState.Deactivated && _isVisible)
         {
             await Task.Delay(40);
             HideAnimated();
@@ -145,14 +146,14 @@ public sealed partial class LauncherWindow : Window
 
     private void PromptBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key == Windows.System.VirtualKey.Enter)
+        if (e.Key == VirtualKey.Enter)
         {
             e.Handled = true;
             _ = SubmitPromptAsync();
             return;
         }
 
-        if (e.Key == Windows.System.VirtualKey.Escape)
+        if (e.Key == VirtualKey.Escape)
         {
             if (_isBusy)
             {
@@ -165,12 +166,6 @@ public sealed partial class LauncherWindow : Window
 
             e.Handled = true;
         }
-    }
-
-    private void SettingsButton_Click(object sender, RoutedEventArgs e)
-    {
-        StartupLogService.Info("Launcher requested settings.");
-        App.ShowSettings();
     }
 
     private async Task SubmitPromptAsync()
@@ -260,18 +255,52 @@ public sealed partial class LauncherWindow : Window
         {
             await EnqueueOnUiAsync(() =>
             {
-                Activate();
-                var hwnd = WindowNative.GetWindowHandle(this);
-                _ = ShowWindow(hwnd, SwShow);
-                _ = SetForegroundWindow(hwnd);
-                PromptBox.Focus(FocusState.Keyboard);
+                ForceWindowForeground();
+                PromptBox.UpdateLayout();
+                _ = PromptBox.Focus(FocusState.Programmatic);
+                _ = PromptBox.Focus(FocusState.Keyboard);
                 if (!string.IsNullOrWhiteSpace(PromptBox.Text))
                 {
                     PromptBox.SelectAll();
                 }
             });
 
-            await Task.Delay(attempt == 0 ? 25 : 70);
+            await Task.Delay(attempt == 0 ? 40 : 90);
+        }
+    }
+
+    private void ForceWindowForeground()
+    {
+        Activate();
+        var hwnd = WindowNative.GetWindowHandle(this);
+        _ = ShowWindow(hwnd, SwShow);
+        _ = BringWindowToTop(hwnd);
+
+        var foreground = GetForegroundWindow();
+        var currentThread = GetCurrentThreadId();
+        var foregroundThread = foreground == nint.Zero
+            ? 0u
+            : GetWindowThreadProcessId(foreground, out _);
+
+        if (foregroundThread != 0 && foregroundThread != currentThread)
+        {
+            _ = AttachThreadInput(foregroundThread, currentThread, true);
+            try
+            {
+                _ = SetForegroundWindow(hwnd);
+                _ = SetActiveWindow(hwnd);
+                _ = SetFocus(hwnd);
+            }
+            finally
+            {
+                _ = AttachThreadInput(foregroundThread, currentThread, false);
+            }
+        }
+        else
+        {
+            _ = SetForegroundWindow(hwnd);
+            _ = SetActiveWindow(hwnd);
+            _ = SetFocus(hwnd);
         }
     }
 
@@ -648,6 +677,27 @@ public sealed partial class LauncherWindow : Window
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetForegroundWindow(nint hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool BringWindowToTop(nint hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint SetActiveWindow(nint hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint SetFocus(nint hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(nint hWnd, out uint processId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 
     private sealed class ConversationTurnView(
         string prompt,
