@@ -1,5 +1,6 @@
 using AgentShell.Services;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
 using WinRT.Interop;
@@ -26,6 +27,8 @@ public sealed partial class LauncherWindow : Window
             _visuals.InitializeLauncherChrome();
             _visuals.MoveTopRight(false);
             StartupLogService.Info("Launcher visuals initialized.");
+
+            GetAppWindow().Closing += AppWindow_Closing;
 
             _hotkey = new GlobalHotkeyService(this, 7001, 0xA3);
             _hotkey.HotkeyPressed += Hotkey_HotkeyPressed;
@@ -146,6 +149,11 @@ public sealed partial class LauncherWindow : Window
         HideAnimated();
     }
 
+    private void SettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        App.ShowSettings();
+    }
+
     private void Hotkey_HotkeyPressed(object? sender, EventArgs e)
     {
         StartupLogService.Info("Global hotkey pressed.");
@@ -182,6 +190,18 @@ public sealed partial class LauncherWindow : Window
         }
 
         return tcs.Task;
+    }
+
+    private void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        args.Cancel = true;
+        StartupLogService.Info("Launcher close intercepted, hiding instead.");
+        HideAnimated();
+    }
+
+    private AppWindow GetAppWindow()
+    {
+        return AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowNative.GetWindowHandle(this)));
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]

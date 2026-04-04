@@ -16,12 +16,31 @@
             BorderThickness="1"
             CornerRadius="28">
             <Grid RowDefinitions="Auto,Auto">
-                <TextBlock
-                    Text="Agent"
-                    Foreground="{StaticResource ShellAccentBrush}"
-                    FontSize="13"
-                    FontWeight="SemiBold"
-                    Opacity="0.92" />
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock
+                        Text="Agent"
+                        Foreground="{StaticResource ShellAccentBrush}"
+                        FontSize="13"
+                        FontWeight="SemiBold"
+                        Opacity="0.92"
+                        VerticalAlignment="Center" />
+                    <Button
+                        x:Name="SettingsButton"
+                        Grid.Column="1"
+                        Width="28"
+                        Height="28"
+                        Padding="0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        FontSize="14"
+                        Content="⚙"
+                        Background="#18212E"
+                        Foreground="{StaticResource ShellTextBrush}"
+                        BorderBrush="#263243"
+                        BorderThickness="1"
+                        CornerRadius="14"
+                        Click="SettingsButton_Click" />
+                </Grid>
                 <TextBox
                     x:Name="PromptBox"
                     Grid.Row="1"
