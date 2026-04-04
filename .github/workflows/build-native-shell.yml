@@ -36,9 +36,9 @@ jobs:
       - name: Publish native shell
         shell: pwsh
         run: |
-          $publishDir = Join-Path $PWD 'native/AgentShell/publish/win-x64'
+          $publishDir = 'native/AgentShell/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/publish'
           if (Test-Path $publishDir) { Remove-Item -LiteralPath $publishDir -Recurse -Force }
-          msbuild native/AgentShell/AgentShell.csproj /t:Publish /p:Configuration=Release /p:Platform=x64 /p:RuntimeIdentifier=win-x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true /p:PublishDir="$publishDir\\" *>&1 | Tee-Object -FilePath native-publish.log
+          msbuild native/AgentShell/AgentShell.csproj /t:Publish /p:Configuration=Release /p:Platform=x64 *>&1 | Tee-Object -FilePath native-publish.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Bundle llama.cpp runtime
@@ -49,7 +49,7 @@ jobs:
           if (-not $asset) { throw 'llama.cpp win-cpu-x64 asset not found.' }
           $zip = Join-Path $env:RUNNER_TEMP 'llama.cpp.zip'
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
-          $output = 'native/AgentShell/publish/win-x64/runtimes/llama.cpp'
+          $output = 'native/AgentShell/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/publish/runtimes/llama.cpp'
           New-Item -ItemType Directory -Force -Path $output | Out-Null
           Expand-Archive -LiteralPath $zip -DestinationPath $output -Force
 
@@ -59,7 +59,7 @@ jobs:
           choco install tesseract --yes --no-progress
           $source = 'C:\Program Files\Tesseract-OCR'
           if (!(Test-Path $source)) { throw 'Tesseract install not found.' }
-          $output = 'native/AgentShell/publish/win-x64/runtimes/tesseract'
+          $output = 'native/AgentShell/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/publish/runtimes/tesseract'
           New-Item -ItemType Directory -Force -Path $output | Out-Null
           Copy-Item -Path (Join-Path $source '*') -Destination $output -Recurse -Force
           $tessData = Join-Path $output 'tessdata'
@@ -70,7 +70,7 @@ jobs:
       - name: Add simple uninstall script
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path 'native/AgentShell/publish/win-x64' -Filter 'AgentShell.exe' -Recurse -File | Select-Object -First 1
+          $exe = Get-ChildItem -Path 'native/AgentShell/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/publish' -Filter 'AgentShell.exe' -Recurse -File | Select-Object -First 1
           if (-not $exe) { throw 'AgentShell.exe not found in publish output.' }
           $output = $exe.Directory.FullName
           Copy-Item -LiteralPath 'native/support/unins000.cmd' -Destination (Join-Path $output 'unins000.cmd') -Force
@@ -80,7 +80,7 @@ jobs:
         if: success()
         shell: pwsh
         run: |
-          $output = 'native/AgentShell/publish/win-x64'
+          $output = 'native/AgentShell/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/publish'
           if (!(Test-Path $output)) { throw "Build output not found: $output" }
           if (Test-Path 'dist-app') { Remove-Item -LiteralPath 'dist-app' -Recurse -Force }
           New-Item -ItemType Directory -Force -Path 'dist-app' | Out-Null
@@ -109,7 +109,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-shell-windows
-          path: native/AgentShell/publish/win-x64/**
+          path: native/AgentShell/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/publish/**
           if-no-files-found: error
 
       - name: Upload native shell logs
