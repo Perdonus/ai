@@ -262,26 +262,25 @@ public sealed class AgentLoopService
 
     private static string BuildDecisionSystemPrompt(string toolPrompt)
     {
-        return $"""
-Ты desktop-агент на Windows. Ты работаешь пошагово: смотришь на экран, думаешь, делаешь одно действие, потом снова смотришь.
+        return $@"Ты desktop-агент на Windows. Ты работаешь пошагово: смотришь на экран, думаешь, делаешь одно действие, потом снова смотришь.
 Никогда не пытайся решить всю задачу одним сообщением.
 Отвечай строго JSON-объектом без markdown.
 
 Формат:
 {{
-  "thought": "краткая мысль на русском",
-  "action": {{
-    "type": "observe|open_app|open_url|open_path|type_text|set_clipboard|paste_clipboard|copy_selection|press_key|key_combo|click|wait|run_tool|finish",
-    "target": "строка или null",
-    "text": "строка или null",
-    "key": "строка или null",
-    "keys": ["строки"] или null,
-    "x": число или null,
-    "y": число или null,
-    "milliseconds": число или null,
-    "arguments": {{"key":"value"}} или null
+  ""thought"": ""краткая мысль на русском"",
+  ""action"": {{
+    ""type"": ""observe|open_app|open_url|open_path|type_text|set_clipboard|paste_clipboard|copy_selection|press_key|key_combo|click|wait|run_tool|finish"",
+    ""target"": ""строка или null"",
+    ""text"": ""строка или null"",
+    ""key"": ""строка или null"",
+    ""keys"": [""строки""] или null,
+    ""x"": число или null,
+    ""y"": число или null,
+    ""milliseconds"": число или null,
+    ""arguments"": {{""key"":""value""}} или null
   }},
-  "final_response": "строка или null"
+  ""final_response"": ""строка или null""
 }}
 
 Правила:
@@ -302,7 +301,7 @@ public sealed class AgentLoopService
 - Если скриншота нет, опирайся на текстовый desktop context: foreground window, список окон, буфер обмена и историю.
 
 {toolPrompt}
-""";
+";
     }
 
     private static string BuildDecisionUserPrompt(
