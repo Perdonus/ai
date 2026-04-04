@@ -74,7 +74,17 @@ jobs:
         if: success()
         shell: pwsh
         run: |
-          Copy-Item -LiteralPath 'widgets-catalog.json' -Destination 'widget-dist/widgets-catalog.json' -Force
+          if (Test-Path 'widget-release') { Remove-Item -LiteralPath 'widget-release' -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path 'widget-release/widgets' | Out-Null
+          Get-ChildItem widgets -Directory | ForEach-Object {
+            $manifestPath = Join-Path $_.FullName 'widget.json'
+            if (!(Test-Path $manifestPath)) { return }
+            $target = Join-Path 'widget-release/widgets' $_.Name
+            New-Item -ItemType Directory -Force -Path $target | Out-Null
+            robocopy $_.FullName $target /E /XD bin obj .git | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "Failed to stage widget folder $($_.Name)" }
+          }
+          Copy-Item -LiteralPath 'widgets-catalog.json' -Destination 'widget-release/widgets-catalog.json' -Force
           $builtAt = (Get-Date).ToUniversalTime().ToString('o')
           @"
           {
@@ -83,7 +93,7 @@ jobs:
             "sha": "${{ github.sha }}",
             "built_at_utc": "$builtAt"
           }
-          "@ | Set-Content -LiteralPath 'widget-dist/build-info.json' -Encoding UTF8
+          "@ | Set-Content -LiteralPath 'widget-release/build-info.json' -Encoding UTF8
 
       - name: Publish widget package branch
         if: success()
@@ -91,5 +101,5 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: dist-widgets
-          publish_dir: widget-dist
+          publish_dir: widget-release
           force_orphan: true
