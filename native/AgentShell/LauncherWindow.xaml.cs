@@ -18,6 +18,8 @@ public sealed partial class LauncherWindow : Window
     private bool _isVisible;
     private bool _ignoreNextDeactivation;
 
+    public GlobalHotkeyService HotkeyService => _hotkey;
+
     public LauncherWindow()
     {
         try

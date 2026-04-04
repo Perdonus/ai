@@ -12,15 +12,22 @@ public sealed class GlobalHotkeyService : IDisposable
     private const int WmSyskeydown = 0x0104;
     private const int WmSyskeyup = 0x0105;
 
+    public const uint TrayCallbackMessage = 0x8001;
+
+    private readonly nint _hwnd;
     private readonly LowLevelKeyboardProc _hookProc;
     private readonly uint _virtualKey;
+    private readonly IntPtr _previousWndProc;
+    private readonly WndProc _wndProcDelegate;
     private nint _hookHandle;
     private bool _pressed;
 
     public event EventHandler? HotkeyPressed;
+    public event EventHandler<TrayIconMessageEventArgs>? TrayMessageReceived;
 
     public GlobalHotkeyService(Window window, int hotkeyId, uint virtualKey)
     {
+        _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
         _virtualKey = virtualKey;
         _hookProc = HookCallback;
         _hookHandle = SetHook(_hookProc);
@@ -28,6 +35,9 @@ public sealed class GlobalHotkeyService : IDisposable
         {
             throw new InvalidOperationException($"Unable to install low-level keyboard hook for 0x{virtualKey:X2}");
         }
+
+        _wndProcDelegate = WndProcHook;
+        _previousWndProc = SetWindowLongPtr(_hwnd, -4, Marshal.GetFunctionPointerForDelegate(_wndProcDelegate));
     }
 
     public void Dispose()
@@ -36,6 +46,11 @@ public sealed class GlobalHotkeyService : IDisposable
         {
             _ = UnhookWindowsHookEx(_hookHandle);
             _hookHandle = nint.Zero;
+        }
+
+        if (_previousWndProc != IntPtr.Zero)
+        {
+            _ = SetWindowLongPtr(_hwnd, -4, _previousWndProc);
         }
     }
 
@@ -65,6 +80,17 @@ public sealed class GlobalHotkeyService : IDisposable
         return CallNextHookEx(_hookHandle, code, wParam, lParam);
     }
 
+    private nint WndProcHook(nint hwnd, uint message, nuint wParam, nint lParam)
+    {
+        if (message == TrayCallbackMessage)
+        {
+            TrayMessageReceived?.Invoke(this, new TrayIconMessageEventArgs(unchecked((uint)lParam.ToInt64())));
+            return 0;
+        }
+
+        return CallWindowProc(_previousWndProc, hwnd, message, wParam, lParam);
+    }
+
     private static nint SetHook(LowLevelKeyboardProc proc)
     {
         using var currentProcess = Process.GetCurrentProcess();
@@ -73,6 +99,7 @@ public sealed class GlobalHotkeyService : IDisposable
     }
 
     private delegate nint LowLevelKeyboardProc(int nCode, nuint wParam, nint lParam);
+    private delegate nint WndProc(nint hwnd, uint message, nuint wParam, nint lParam);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct KbdLlHookStruct
@@ -95,4 +122,12 @@ public sealed class GlobalHotkeyService : IDisposable
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern nint GetModuleHandle(string? lpModuleName);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr(nint hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll")]
+    private static extern nint CallWindowProc(IntPtr lpPrevWndFunc, nint hWnd, uint msg, nuint wParam, nint lParam);
 }
+
+public sealed record TrayIconMessageEventArgs(uint Message);

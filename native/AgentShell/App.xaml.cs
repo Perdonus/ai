@@ -34,7 +34,7 @@ public partial class App : Application
 
             Launcher = new LauncherWindow();
             StartupLogService.Info("Launcher window created.");
-            _trayIcon = new TrayIconService(OpenLauncher, ShowSettings, ExitApp);
+            _trayIcon = new TrayIconService(Launcher, OpenLauncher, Launcher.HotkeyService);
             Launcher.Activate();
             Launcher.HideAnimated(immediate: true);
             StartupLogService.Info("Launcher hidden immediately after activation.");
@@ -79,18 +79,6 @@ public partial class App : Application
         }
 
         Launcher.DispatcherQueue.TryEnqueue(async () => await Launcher.ShowAnimatedAsync());
-    }
-
-    private void ExitApp()
-    {
-        try
-        {
-            _trayIcon?.Dispose();
-        }
-        finally
-        {
-            Exit();
-        }
     }
 
     private void App_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
