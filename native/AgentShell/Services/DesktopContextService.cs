@@ -9,14 +9,33 @@ public sealed class DesktopContextService
     public DesktopContextSnapshot Capture()
     {
         _ = GetCursorPos(out var point);
-        var foreground = TryGetWindowSummary(GetForegroundWindow());
+        var virtualScreen = GetVirtualScreen();
+        var currentMonitor = GetCurrentMonitor(point, virtualScreen);
         var visibleWindows = EnumerateVisibleWindows();
+        var foreground = NormalizeForegroundWindow(TryGetWindowSummary(GetForegroundWindow()), visibleWindows);
 
         return new DesktopContextSnapshot(
             point.X,
             point.Y,
+            virtualScreen,
+            currentMonitor,
             foreground,
             visibleWindows);
+    }
+
+    private static WindowSummary? NormalizeForegroundWindow(WindowSummary? foreground, IReadOnlyList<WindowSummary> visibleWindows)
+    {
+        if (foreground is null)
+        {
+            return visibleWindows.FirstOrDefault();
+        }
+
+        if (!string.Equals(foreground.ProcessName, "AgentShell", StringComparison.OrdinalIgnoreCase))
+        {
+            return foreground;
+        }
+
+        return visibleWindows.FirstOrDefault() ?? foreground;
     }
 
     private static IReadOnlyList<WindowSummary> EnumerateVisibleWindows()
@@ -79,6 +98,41 @@ public sealed class DesktopContextService
             height);
     }
 
+    private static RectSummary GetVirtualScreen()
+    {
+        return new RectSummary(
+            GetSystemMetrics(SmXvirtualscreen),
+            GetSystemMetrics(SmYvirtualscreen),
+            GetSystemMetrics(SmCxvirtualscreen),
+            GetSystemMetrics(SmCyvirtualscreen));
+    }
+
+    private static MonitorSnapshot GetCurrentMonitor(Point point, RectSummary fallback)
+    {
+        var handle = MonitorFromPoint(point, MonitorDefaulttonearest);
+        var monitorInfo = new MonitorInfo
+        {
+            cbSize = (uint)Marshal.SizeOf<MonitorInfo>()
+        };
+
+        if (handle == nint.Zero || !GetMonitorInfoW(handle, ref monitorInfo))
+        {
+            return new MonitorSnapshot(fallback, fallback);
+        }
+
+        return new MonitorSnapshot(
+            new RectSummary(
+                monitorInfo.rcMonitor.Left,
+                monitorInfo.rcMonitor.Top,
+                Math.Max(0, monitorInfo.rcMonitor.Right - monitorInfo.rcMonitor.Left),
+                Math.Max(0, monitorInfo.rcMonitor.Bottom - monitorInfo.rcMonitor.Top)),
+            new RectSummary(
+                monitorInfo.rcWork.Left,
+                monitorInfo.rcWork.Top,
+                Math.Max(0, monitorInfo.rcWork.Right - monitorInfo.rcWork.Left),
+                Math.Max(0, monitorInfo.rcWork.Bottom - monitorInfo.rcWork.Top)));
+    }
+
     private static string TryGetProcessName(uint processId)
     {
         try
@@ -90,6 +144,12 @@ public sealed class DesktopContextService
             return "unknown";
         }
     }
+
+    private const int SmXvirtualscreen = 76;
+    private const int SmYvirtualscreen = 77;
+    private const int SmCxvirtualscreen = 78;
+    private const int SmCyvirtualscreen = 79;
+    private const uint MonitorDefaulttonearest = 2;
 
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, nint lParam);
@@ -115,6 +175,15 @@ public sealed class DesktopContextService
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetCursorPos(out Point lpPoint);
 
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromPoint(Point pt, uint dwFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool GetMonitorInfoW(nint hMonitor, ref MonitorInfo lpmi);
+
     private delegate bool EnumWindowsProc(nint hWnd, nint lParam);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -132,11 +201,22 @@ public sealed class DesktopContextService
         public int X;
         public int Y;
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct MonitorInfo
+    {
+        public uint cbSize;
+        public Rect rcMonitor;
+        public Rect rcWork;
+        public uint dwFlags;
+    }
 }
 
 public sealed record DesktopContextSnapshot(
     int CursorX,
     int CursorY,
+    RectSummary VirtualScreen,
+    MonitorSnapshot CurrentMonitor,
     WindowSummary? ForegroundWindow,
     IReadOnlyList<WindowSummary> VisibleWindows)
 {
@@ -144,12 +224,33 @@ public sealed record DesktopContextSnapshot(
     {
         var builder = new StringBuilder();
         builder.AppendLine($"Cursor: {CursorX},{CursorY}");
+        builder.AppendLine($"Virtual screen: {VirtualScreen.Left},{VirtualScreen.Top} {VirtualScreen.Width}x{VirtualScreen.Height}");
+        builder.AppendLine(
+            $"Current monitor: {CurrentMonitor.Bounds.Left},{CurrentMonitor.Bounds.Top} {CurrentMonitor.Bounds.Width}x{CurrentMonitor.Bounds.Height}");
+        builder.AppendLine(
+            $"Current work area: {CurrentMonitor.WorkArea.Left},{CurrentMonitor.WorkArea.Top} {CurrentMonitor.WorkArea.Width}x{CurrentMonitor.WorkArea.Height}");
+        builder.AppendLine(
+            $"Cursor in current monitor: {CursorX - CurrentMonitor.Bounds.Left},{CursorY - CurrentMonitor.Bounds.Top}");
         builder.AppendLine($"Clipboard: {clipboardPreview}");
 
         if (ForegroundWindow is not null)
         {
             builder.AppendLine(
                 $"Foreground window: {ForegroundWindow.ProcessName} | \"{ForegroundWindow.Title}\" | {ForegroundWindow.Left},{ForegroundWindow.Top} {ForegroundWindow.Width}x{ForegroundWindow.Height}");
+
+            var relX = CursorX - ForegroundWindow.Left;
+            var relY = CursorY - ForegroundWindow.Top;
+            if (relX >= 0 && relY >= 0 && relX <= ForegroundWindow.Width && relY <= ForegroundWindow.Height)
+            {
+                var percentX = ForegroundWindow.Width == 0
+                    ? 0
+                    : (int)Math.Round(relX * 100.0 / ForegroundWindow.Width);
+                var percentY = ForegroundWindow.Height == 0
+                    ? 0
+                    : (int)Math.Round(relY * 100.0 / ForegroundWindow.Height);
+                builder.AppendLine(
+                    $"Cursor in foreground window: {relX},{relY} ({percentX}% x, {percentY}% y)");
+            }
         }
         else
         {
@@ -179,12 +280,26 @@ public sealed record DesktopContextSnapshot(
                 .Append(window.Width)
                 .Append('x')
                 .Append(window.Height)
+                .Append(" | center ")
+                .Append(window.Left + (window.Width / 2))
+                .Append(',')
+                .Append(window.Top + (window.Height / 2))
                 .AppendLine();
         }
 
         return builder.ToString().TrimEnd();
     }
 }
+
+public sealed record RectSummary(
+    int Left,
+    int Top,
+    int Width,
+    int Height);
+
+public sealed record MonitorSnapshot(
+    RectSummary Bounds,
+    RectSummary WorkArea);
 
 public sealed record WindowSummary(
     string Title,

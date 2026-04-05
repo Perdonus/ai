@@ -13,9 +13,9 @@ namespace AgentShell.Services;
 public sealed class WindowVisualService(Window window, FrameworkElement animatedRoot)
 {
     private const int CompactWidth = 500;
-    private const int CompactHeight = 66;
+    private const int CompactHeight = 86;
     private const int ExpandedWidth = 560;
-    private const int ExpandedExtraHeight = 36;
+    private const int ExpandedExtraHeight = 24;
     private const int MinExpandedHeight = 148;
     private const int VisibleMargin = 18;
     private const int SwHide = 0;
@@ -26,6 +26,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     private readonly FrameworkElement _animatedRoot = animatedRoot;
     private readonly DispatcherQueue _dispatcherQueue = window.DispatcherQueue;
     private readonly AppWindow _appWindow = AppWindow.GetFromWindowId(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowNative.GetWindowHandle(window)));
+    private CancellationTokenSource? _resizeCts;
     private bool _expanded;
 
     public void InitializeLauncherChrome()
@@ -45,6 +46,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         EnsureTaskbarWindowStyle();
         EnableTransparentHost();
         SuppressWindowFrame();
+        _animatedRoot.SizeChanged += AnimatedRoot_SizeChanged;
         SetCompact();
         StartupLogService.Info("Launcher chrome initialized.");
     }
@@ -52,9 +54,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     public void SetCompact()
     {
         _expanded = false;
-        _appWindow.Resize(new SizeInt32(CompactWidth, CompactHeight));
-        ApplyWindowRegion();
-        StartupLogService.Info($"Launcher size mode set to compact {CompactWidth}x{CompactHeight}.");
+        QueueResize(new SizeInt32(CompactWidth, CompactHeight), "compact");
     }
 
     public void SetExpandedToContent(double desiredConversationHeight)
@@ -64,9 +64,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         var maxWindowHeight = Math.Max(CompactHeight, workArea.Height - (VisibleMargin * 2));
         var desiredHeight = CompactHeight + ExpandedExtraHeight + (int)Math.Ceiling(Math.Max(0, desiredConversationHeight));
         var height = Math.Clamp(desiredHeight, MinExpandedHeight, maxWindowHeight);
-        _appWindow.Resize(new SizeInt32(ExpandedWidth, height));
-        ApplyWindowRegion();
-        StartupLogService.Info($"Launcher size mode set to expanded {ExpandedWidth}x{height}. desiredConversationHeight={desiredConversationHeight:0.##}; maxWindowHeight={maxWindowHeight}.");
+        QueueResize(new SizeInt32(ExpandedWidth, height), $"expanded:{desiredConversationHeight:0.##}");
     }
 
     public double GetMaxConversationHeight()
@@ -78,6 +76,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
     public void HideImmediately()
     {
+        _resizeCts?.Cancel();
         var hwnd = WindowNative.GetWindowHandle(_window);
         _ = ShowWindow(hwnd, SwHide);
         StartupLogService.Info("Launcher hidden with SW_HIDE.");
@@ -87,16 +86,18 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     {
         var compositor = ElementCompositionPreview.GetElementVisual(_animatedRoot).Compositor;
         var visual = ElementCompositionPreview.GetElementVisual(_animatedRoot);
+        var duration = TimeSpan.FromMilliseconds(show ? 170 : 140);
+        visual.CenterPoint = new System.Numerics.Vector3((float)Math.Max(1, _animatedRoot.ActualWidth), 0, 0);
 
         var offset = compositor.CreateVector3KeyFrameAnimation();
-        offset.Duration = TimeSpan.FromMilliseconds(show ? 180 : 140);
-        offset.InsertKeyFrame(0f, new System.Numerics.Vector3(0, 0, 0));
-        offset.InsertKeyFrame(1f, new System.Numerics.Vector3(0, 0, 0));
+        offset.Duration = duration;
+        offset.InsertKeyFrame(0f, show ? new System.Numerics.Vector3(0, -10, 0) : new System.Numerics.Vector3(0, 0, 0));
+        offset.InsertKeyFrame(1f, show ? new System.Numerics.Vector3(0, 0, 0) : new System.Numerics.Vector3(0, -8, 0));
 
-        var opacity = compositor.CreateScalarKeyFrameAnimation();
-        opacity.Duration = offset.Duration;
-        opacity.InsertKeyFrame(0f, show ? 0f : 1f);
-        opacity.InsertKeyFrame(1f, show ? 1f : 0f);
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.Duration = duration;
+        scale.InsertKeyFrame(0f, show ? new System.Numerics.Vector3(0.97f, 0.97f, 1f) : new System.Numerics.Vector3(1f, 1f, 1f));
+        scale.InsertKeyFrame(1f, show ? new System.Numerics.Vector3(1f, 1f, 1f) : new System.Numerics.Vector3(0.985f, 0.985f, 1f));
 
         if (show)
         {
@@ -109,9 +110,10 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         }
 
         visual.StartAnimation("Offset", offset);
-        visual.StartAnimation("Opacity", opacity);
+        visual.StartAnimation("Scale", scale);
 
-        await Task.Delay(offset.Duration);
+        await Task.Delay(duration);
+        await EnqueueAsync(RefreshGeometry);
 
         if (!show)
         {
@@ -132,6 +134,12 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         _appWindow.Move(new PointInt32(x, y));
         StartupLogService.Info(
             $"Launcher moved. expanded={_expanded}; workArea={workArea.X},{workArea.Y},{workArea.Width},{workArea.Height}; size={width}x{height}; target={x},{y}");
+    }
+
+    public void RefreshGeometry()
+    {
+        ApplyWindowRegion();
+        MoveTopRight();
     }
 
     private RectInt32 GetCurrentMonitorWorkArea()
@@ -168,6 +176,72 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         }
 
         return tcs.Task;
+    }
+
+    private void QueueResize(SizeInt32 targetSize, string reason)
+    {
+        _resizeCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _resizeCts = cts;
+        _ = AnimateResizeAsync(targetSize, reason, cts.Token);
+    }
+
+    private async Task AnimateResizeAsync(SizeInt32 targetSize, string reason, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var startSize = _appWindow.Size;
+            if (startSize.Width == targetSize.Width && startSize.Height == targetSize.Height)
+            {
+                await EnqueueAsync(RefreshGeometry);
+                return;
+            }
+
+            const int steps = 7;
+            for (var step = 1; step <= steps; step++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var width = Lerp(startSize.Width, targetSize.Width, step, steps);
+                var height = Lerp(startSize.Height, targetSize.Height, step, steps);
+                await EnqueueAsync(() =>
+                {
+                    _appWindow.Resize(new SizeInt32(width, height));
+                    RefreshGeometry();
+                });
+                await Task.Delay(18, cancellationToken);
+            }
+
+            StartupLogService.Info($"Launcher resize applied. reason={reason}; size={targetSize.Width}x{targetSize.Height}");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Warn($"Launcher resize animation failed. reason={reason}; error={ex.Message}");
+        }
+    }
+
+    private void AnimatedRoot_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.NewSize.Width <= 0 || e.NewSize.Height <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            RefreshGeometry();
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Warn($"Launcher geometry refresh on size change failed: {ex.Message}");
+        }
+    }
+
+    private static int Lerp(int start, int end, int step, int steps)
+    {
+        return start + ((end - start) * step / steps);
     }
 
     private void EnsureTaskbarWindowStyle()
@@ -208,7 +282,9 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
         windowContent.UpdateLayout();
         _animatedRoot.UpdateLayout();
-        if (_animatedRoot.ActualWidth <= 0 || _animatedRoot.ActualHeight <= 0)
+        var rootWidth = _animatedRoot.ActualWidth > 0 ? _animatedRoot.ActualWidth : _animatedRoot.DesiredSize.Width;
+        var rootHeight = _animatedRoot.ActualHeight > 0 ? _animatedRoot.ActualHeight : _animatedRoot.DesiredSize.Height;
+        if (rootWidth <= 0 || rootHeight <= 0)
         {
             StartupLogService.Warn("Failed to apply launcher region because animated root has no size yet.");
             return;
@@ -216,7 +292,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
         var scale = _animatedRoot.XamlRoot?.RasterizationScale ?? 1.0;
         var transform = _animatedRoot.TransformToVisual(windowContent);
-        var bounds = transform.TransformBounds(new Rect(0, 0, _animatedRoot.ActualWidth, _animatedRoot.ActualHeight));
+        var bounds = transform.TransformBounds(new Rect(0, 0, rootWidth, rootHeight));
         var left = (int)Math.Floor(bounds.X * scale);
         var top = (int)Math.Floor(bounds.Y * scale);
         var width = Math.Max(1, (int)Math.Ceiling(bounds.Width * scale));

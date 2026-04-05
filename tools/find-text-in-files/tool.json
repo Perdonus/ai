@@ -1,0 +1,18 @@
+{
+  "id": "find-text-in-files",
+  "name": "Find Text In Files",
+  "description": "Search for text recursively inside files under a root directory.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this when you need to find where a string appears in a folder tree and ripgrep is not available through other tools.",
+  "parameter_hints": {
+    "root": "absolute root folder",
+    "text": "literal text to search for"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "cd /d \"{{root}}\" && findstr /s /n /i /c:\"{{text}}\" *.*"
+  ],
+  "version": "0.1.0"
+}

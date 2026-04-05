@@ -1,4 +1,5 @@
 using AgentShell.Models;
+using System.Text;
 using System.Text.Json;
 
 namespace AgentShell.Services;
@@ -13,6 +14,38 @@ public sealed class RuntimeCatalogService
     public async Task<IReadOnlyList<RuntimeItem>> LoadToolsAsync()
     {
         return await LoadRuntimeItemsAsync("tools", "tool.json");
+    }
+
+    public string BuildWidgetPrompt(IReadOnlyList<RuntimeItem> widgets)
+    {
+        if (widgets.Count == 0)
+        {
+            return "No runtime widgets are installed.";
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("Installed runtime widgets:");
+        foreach (var widget in widgets)
+        {
+            builder.Append("- open_widget target=\"")
+                .Append(widget.Id)
+                .Append("\": ")
+                .Append(widget.Name);
+
+            if (!string.IsNullOrWhiteSpace(widget.Description))
+            {
+                builder.Append(" - ").Append(widget.Description.Trim());
+            }
+
+            if (widget.SupportsDataInput)
+            {
+                builder.Append(" Supports send_widget_data with text payload.");
+            }
+
+            builder.AppendLine();
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     private static async Task<IReadOnlyList<RuntimeItem>> LoadRuntimeItemsAsync(string folderName, string manifestName)
@@ -67,6 +100,7 @@ public sealed class RuntimeCatalogService
     private static IEnumerable<string> RuntimeRoots(string folderName)
     {
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DesktopAIAgent", folderName);
+        yield return Path.Combine(AppContext.BaseDirectory, folderName);
         yield return Path.Combine("Z:\\ai", folderName);
     }
 

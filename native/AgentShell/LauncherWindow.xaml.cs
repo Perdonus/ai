@@ -463,6 +463,8 @@ public sealed partial class LauncherWindow : Window
 
         _turns.Add(turn);
         ConversationPanel.Children.Add(root);
+        AppendTimelineEntry(turn, "Запрос", prompt);
+        RenderTimeline(turn);
         UpdateElapsedText(turn);
         RefreshExpandedLayout();
         ScrollConversationToEnd();
@@ -475,16 +477,20 @@ public sealed partial class LauncherWindow : Window
         turn.SummaryText.Text = "Думаю...";
         turn.Spinner.Visibility = Visibility.Visible;
         turn.Spinner.IsActive = true;
+        AppendStatusEntry(turn, "Думаю...");
+        RenderTimeline(turn);
         UpdateElapsedText(turn);
         _turnTimer.Start();
     }
 
     private void UpdateTurnProgress(ConversationTurnView turn, AgentLoopProgress update)
     {
-        turn.SummaryText.Text = string.IsNullOrWhiteSpace(update.Status) ? "Думаю..." : update.Status.Trim();
-        ApplyDetailsText(turn.DetailsText, BuildDetailsText(update.Status, update.Thinking));
+        var status = string.IsNullOrWhiteSpace(update.Status) ? "Думаю..." : update.Status.Trim();
+        turn.SummaryText.Text = status;
+        AppendStatusEntry(turn, status);
+        AppendThinkingEntries(turn, update.Thinking);
+        RenderTimeline(turn);
         RefreshTurnDetailsVisibility(turn);
-        RefreshExpandedLayout();
 
         if (!string.IsNullOrWhiteSpace(update.Answer))
         {
@@ -503,17 +509,13 @@ public sealed partial class LauncherWindow : Window
         turn.Spinner.Visibility = Visibility.Collapsed;
         UpdateElapsedText(turn);
 
-        if (!string.IsNullOrWhiteSpace(result.Thinking))
-        {
-            ApplyDetailsText(turn.DetailsText, result.Thinking);
-        }
-
-        RefreshTurnDetailsVisibility(turn);
-        RefreshExpandedLayout();
+        AppendThinkingEntries(turn, result.Thinking);
 
         if (!string.IsNullOrWhiteSpace(result.Error))
         {
             turn.SummaryText.Text = "Ошибка";
+            AppendStatusEntry(turn, "Ошибка");
+            AppendTimelineEntry(turn, "Ошибка", result.Error);
             turn.ErrorText.Text = result.Error;
             turn.ErrorBorder.Visibility = Visibility.Visible;
             turn.AnswerBorder.Visibility = Visibility.Collapsed;
@@ -523,14 +525,18 @@ public sealed partial class LauncherWindow : Window
             turn.ErrorText.Text = string.Empty;
             turn.ErrorBorder.Visibility = Visibility.Collapsed;
             turn.SummaryText.Text = result.WaitingForUser ? "Жду данные" : "Готово";
+            AppendStatusEntry(turn, turn.SummaryText.Text);
 
             if (!string.IsNullOrWhiteSpace(result.Answer))
             {
+                AppendTimelineEntry(turn, "Результат", result.Answer);
                 turn.AnswerText.Text = result.Answer;
                 turn.AnswerBorder.Visibility = Visibility.Visible;
             }
         }
 
+        RenderTimeline(turn);
+        RefreshTurnDetailsVisibility(turn);
         StopTurnTimerIfIdle();
         ScrollConversationToEnd();
     }
@@ -541,6 +547,8 @@ public sealed partial class LauncherWindow : Window
         turn.Spinner.IsActive = false;
         turn.Spinner.Visibility = Visibility.Collapsed;
         turn.SummaryText.Text = "Остановлено";
+        AppendStatusEntry(turn, "Остановлено");
+        AppendTimelineEntry(turn, "Остановлено", "Остановилась по запросу.");
         if (string.IsNullOrWhiteSpace(turn.AnswerText.Text))
         {
             turn.AnswerText.Text = "Остановилась.";
@@ -549,6 +557,7 @@ public sealed partial class LauncherWindow : Window
 
         UpdateElapsedText(turn);
         StopTurnTimerIfIdle();
+        RenderTimeline(turn);
         RefreshExpandedLayout();
     }
 
@@ -558,10 +567,13 @@ public sealed partial class LauncherWindow : Window
         turn.Spinner.IsActive = false;
         turn.Spinner.Visibility = Visibility.Collapsed;
         turn.SummaryText.Text = "Ошибка";
+        AppendStatusEntry(turn, "Ошибка");
+        AppendTimelineEntry(turn, "Ошибка", error);
         turn.ErrorText.Text = error;
         turn.ErrorBorder.Visibility = Visibility.Visible;
         UpdateElapsedText(turn);
         StopTurnTimerIfIdle();
+        RenderTimeline(turn);
         RefreshExpandedLayout();
     }
 
@@ -573,7 +585,7 @@ public sealed partial class LauncherWindow : Window
 
     private void RefreshTurnDetailsVisibility(ConversationTurnView turn)
     {
-        var hasDetails = turn.DetailsText.Blocks.Count > 0;
+        var hasDetails = turn.DetailEntries.Count > 0;
         turn.DetailsBorder.Visibility = hasDetails && turn.DetailsExpanded
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -622,60 +634,122 @@ public sealed partial class LauncherWindow : Window
         ApplyExpandedState(false);
     }
 
-    private static string BuildDetailsText(string status, string thinking)
+    private void AppendStatusEntry(ConversationTurnView turn, string status)
     {
-        if (string.IsNullOrWhiteSpace(status) && string.IsNullOrWhiteSpace(thinking))
-        {
-            return string.Empty;
-        }
-
-        if (string.IsNullOrWhiteSpace(thinking))
-        {
-            return $"Сейчас: {status}";
-        }
-
         if (string.IsNullOrWhiteSpace(status))
-        {
-            return thinking.Trim();
-        }
-
-        return $"Сейчас: {status}{Environment.NewLine}{Environment.NewLine}{thinking.Trim()}";
-    }
-
-    private static void ApplyDetailsText(RichTextBlock block, string text)
-    {
-        block.Blocks.Clear();
-        if (string.IsNullOrWhiteSpace(text))
         {
             return;
         }
 
-        var sections = text
-            .Split($"{Environment.NewLine}{Environment.NewLine}", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var normalized = status.Trim();
+        if (string.Equals(turn.LastStatus, normalized, StringComparison.Ordinal))
+        {
+            return;
+        }
 
+        turn.LastStatus = normalized;
+        AppendTimelineEntry(turn, "Статус", normalized);
+    }
+
+    private void AppendThinkingEntries(ConversationTurnView turn, string thinking)
+    {
+        if (string.IsNullOrWhiteSpace(thinking))
+        {
+            return;
+        }
+
+        var normalized = thinking.Trim();
+        string delta;
+        if (!string.IsNullOrWhiteSpace(turn.LastThinkingSnapshot) &&
+            normalized.StartsWith(turn.LastThinkingSnapshot, StringComparison.Ordinal))
+        {
+            delta = normalized[turn.LastThinkingSnapshot.Length..].Trim();
+        }
+        else
+        {
+            delta = normalized;
+        }
+
+        turn.LastThinkingSnapshot = normalized;
+        if (string.IsNullOrWhiteSpace(delta))
+        {
+            return;
+        }
+
+        var sections = delta
+            .Split($"{Environment.NewLine}{Environment.NewLine}", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (var section in sections)
         {
-            var lines = section.Split(Environment.NewLine, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            if (lines.Length == 0)
-            {
-                continue;
-            }
+            AppendThoughtSection(turn, section);
+        }
+    }
 
+    private void AppendThoughtSection(ConversationTurnView turn, string section)
+    {
+        if (string.IsNullOrWhiteSpace(section))
+        {
+            return;
+        }
+
+        var normalized = section.Trim();
+        var heading = "Мысль";
+        var body = normalized;
+        var colonIndex = normalized.IndexOf(':');
+        if (colonIndex > 0 && colonIndex <= 24)
+        {
+            heading = normalized[..colonIndex].Trim();
+            body = normalized[(colonIndex + 1)..].Trim();
+        }
+
+        AppendTimelineEntry(turn, heading, body);
+    }
+
+    private void AppendTimelineEntry(ConversationTurnView turn, string heading, string body)
+    {
+        var normalizedHeading = string.IsNullOrWhiteSpace(heading) ? "Событие" : heading.Trim();
+        var normalizedBody = string.IsNullOrWhiteSpace(body) ? string.Empty : body.Trim();
+
+        var lastEntry = turn.DetailEntries.LastOrDefault();
+        if (lastEntry is not null &&
+            string.Equals(lastEntry.Heading, normalizedHeading, StringComparison.Ordinal) &&
+            string.Equals(lastEntry.Body, normalizedBody, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        turn.DetailEntries.Add(new ConversationDetailEntry(normalizedHeading, normalizedBody));
+    }
+
+    private static void RenderTimeline(ConversationTurnView turn)
+    {
+        turn.DetailsText.Blocks.Clear();
+        foreach (var entry in turn.DetailEntries)
+        {
             var paragraph = new Paragraph();
-            var heading = new Run { Text = lines[0] };
             var headingSpan = new Span();
-            headingSpan.Inlines.Add(heading);
             headingSpan.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
             headingSpan.FontStyle = Windows.UI.Text.FontStyle.Italic;
+            headingSpan.Inlines.Add(new Run { Text = entry.Heading });
             paragraph.Inlines.Add(headingSpan);
 
-            for (var index = 1; index < lines.Length; index++)
+            if (!string.IsNullOrWhiteSpace(entry.Body))
             {
-                paragraph.Inlines.Add(new LineBreak());
-                paragraph.Inlines.Add(new Run { Text = lines[index] });
+                var lines = entry.Body
+                    .Split(Environment.NewLine, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+                if (lines.Length > 0)
+                {
+                    paragraph.Inlines.Add(new Run { Text = " " });
+                    paragraph.Inlines.Add(new Run { Text = lines[0] });
+                    for (var index = 1; index < lines.Length; index++)
+                    {
+                        paragraph.Inlines.Add(new LineBreak());
+                        paragraph.Inlines.Add(new Run { Text = lines[index] });
+                    }
+                }
             }
 
-            block.Blocks.Add(paragraph);
+            turn.DetailsText.Blocks.Add(paragraph);
         }
     }
 
@@ -772,7 +846,16 @@ public sealed partial class LauncherWindow : Window
         public TextBlock AnswerText { get; } = answerText;
         public Border ErrorBorder { get; } = errorBorder;
         public TextBlock ErrorText { get; } = errorText;
+        public List<ConversationDetailEntry> DetailEntries { get; } = [];
+        public string LastStatus { get; set; } = string.Empty;
+        public string LastThinkingSnapshot { get; set; } = string.Empty;
         public bool DetailsExpanded { get; set; }
         public bool IsBusy { get; set; }
+    }
+
+    private sealed class ConversationDetailEntry(string heading, string body)
+    {
+        public string Heading { get; } = heading;
+        public string Body { get; } = body;
     }
 }

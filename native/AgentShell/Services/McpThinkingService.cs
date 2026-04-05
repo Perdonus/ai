@@ -11,22 +11,23 @@ public sealed class McpThinkingService
         DesktopContextSnapshot context,
         string clipboardPreview,
         string ocrText,
-        IReadOnlyList<RuntimeToolManifest> runtimeTools)
+        IReadOnlyList<RuntimeToolManifest> runtimeTools,
+        IReadOnlyList<RuntimeItem> runtimeWidgets)
     {
         var builder = new StringBuilder();
         builder.AppendLine("MCP planning overlay:");
-        builder.AppendLine("- Думай как оператор ПК: сначала проверка состояния, потом один наблюдаемый шаг.");
-        builder.AppendLine("- Перед вводом текста убедись, что нужное окно активно и курсор стоит в нужном месте.");
-        builder.AppendLine("- Перед удалением, заменой, выделением или рисованием оцени, что сейчас выделено и где находится курсор.");
-        builder.AppendLine("- Если нужно открыть сайт или приложение, сначала добейся его появления среди окон или в OCR.");
-        builder.AppendLine("- Если не хватает логина, пароля, токена, кода, капчи или выбора пользователя, останавливайся через await_user.");
-        builder.AppendLine("- Не имитируй выполнение текстом. Выбирай реальные desktop-действия.");
-        builder.Append("Шаг цикла: ").AppendLine(step.ToString());
-        builder.Append("Буфер обмена: ").AppendLine(string.IsNullOrWhiteSpace(clipboardPreview) ? "(пусто)" : clipboardPreview.Trim());
+        builder.AppendLine("- Think like a PC operator: first verify state, then perform one observable action.");
+        builder.AppendLine("- Before typing, confirm the correct window is focused and the caret is where it should be.");
+        builder.AppendLine("- Before deleting, replacing, selecting, dragging, or drawing, verify what is selected and where the cursor is.");
+        builder.AppendLine("- Before opening a site or app, make sure it actually appeared among visible windows or OCR text.");
+        builder.AppendLine("- If login, password, token, code, captcha, or explicit user choice is required, stop through await_user.");
+        builder.AppendLine("- Do not imitate execution with plain text. Prefer real desktop actions.");
+        builder.Append("Loop step: ").AppendLine(step.ToString());
+        builder.Append("Clipboard: ").AppendLine(string.IsNullOrWhiteSpace(clipboardPreview) ? "(empty)" : clipboardPreview.Trim());
 
         if (context.ForegroundWindow is not null)
         {
-            builder.Append("Активное окно: ")
+            builder.Append("Foreground window: ")
                 .Append(context.ForegroundWindow.ProcessName)
                 .Append(" | \"")
                 .Append(context.ForegroundWindow.Title)
@@ -52,7 +53,30 @@ public sealed class McpThinkingService
             }
         }
 
-        builder.Append("Запрос пользователя: ").AppendLine(userPrompt.Trim());
+        if (runtimeWidgets.Count > 0)
+        {
+            builder.AppendLine("Runtime widgets:");
+            foreach (var widget in runtimeWidgets.Take(6))
+            {
+                builder.Append("- ")
+                    .Append(widget.Id)
+                    .Append(": ")
+                    .Append(widget.Name);
+                if (!string.IsNullOrWhiteSpace(widget.Description))
+                {
+                    builder.Append(" - ").Append(widget.Description.Trim());
+                }
+
+                if (widget.SupportsDataInput)
+                {
+                    builder.Append(" (accepts widget data)");
+                }
+
+                builder.AppendLine();
+            }
+        }
+
+        builder.Append("User request: ").AppendLine(userPrompt.Trim());
         return builder.ToString().TrimEnd();
     }
 }

@@ -1,10 +1,38 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text.Json;
+using AgentShell.Models;
 
 namespace AgentShell.Services;
 
 public sealed class RuntimeWidgetService
 {
+    private const string WidgetReleaseZipUrl = "https://codeload.github.com/Perdonus/ai/zip/refs/heads/dist-widgets";
+    private readonly RuntimeCatalogService _catalog = App.RuntimeCatalog;
+    private readonly HttpClient _httpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(90)
+    };
+
+    public async Task<string> LaunchByIdAsync(string widgetId, CancellationToken cancellationToken)
+    {
+        var widget = await ResolveWidgetAsync(widgetId, cancellationToken);
+        return await TestLaunchAsync(widget.RootPath, cancellationToken);
+    }
+
+    public async Task<string> SendDataAsync(string widgetId, string payload, CancellationToken cancellationToken)
+    {
+        var widget = await ResolveWidgetAsync(widgetId, cancellationToken);
+        if (!widget.SupportsDataInput)
+        {
+            throw new InvalidOperationException($"Widget {widgetId} does not accept data input.");
+        }
+
+        var targetPath = Path.Combine(widget.RootPath, "widget-input.json");
+        await File.WriteAllTextAsync(targetPath, payload, cancellationToken);
+        return $"Widget {widgetId} data updated.";
+    }
+
     public async Task<string> TestLaunchAsync(string widgetRootPath, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -19,6 +47,7 @@ public sealed class RuntimeWidgetService
         var root = document.RootElement;
         var widgetId = ReadString(root, "id") ?? Path.GetFileName(widgetRootPath);
         var kind = (ReadString(root, "kind") ?? "html").Trim().ToLowerInvariant();
+        widgetRootPath = await EnsureLaunchableRootAsync(widgetRootPath, root, widgetId, kind, cancellationToken);
 
         return kind switch
         {
@@ -104,5 +133,112 @@ public sealed class RuntimeWidgetService
             .Select(item => item.GetString() ?? string.Empty)
             .Where(item => !string.IsNullOrWhiteSpace(item))
             .ToList();
+    }
+
+    private async Task<RuntimeItem> ResolveWidgetAsync(string widgetId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var widget = (await _catalog.LoadWidgetsAsync())
+            .FirstOrDefault(item => string.Equals(item.Id, widgetId, StringComparison.OrdinalIgnoreCase));
+
+        return widget ?? throw new InvalidOperationException($"Widget not found: {widgetId}");
+    }
+
+    private async Task<string> EnsureLaunchableRootAsync(
+        string widgetRootPath,
+        JsonElement manifestRoot,
+        string widgetId,
+        string kind,
+        CancellationToken cancellationToken)
+    {
+        if (kind != "native")
+        {
+            return widgetRootPath;
+        }
+
+        var entry = ReadString(manifestRoot, "entry_executable") ?? ReadString(manifestRoot, "entry");
+        if (string.IsNullOrWhiteSpace(entry))
+        {
+            return widgetRootPath;
+        }
+
+        var localExecutable = Path.IsPathFullyQualified(entry)
+            ? entry
+            : Path.Combine(widgetRootPath, entry);
+        if (File.Exists(localExecutable))
+        {
+            return widgetRootPath;
+        }
+
+        StartupLogService.Warn($"Widget executable missing for {widgetId}. Attempting remote widget install.");
+        return await InstallWidgetPackageAsync(widgetId, cancellationToken);
+    }
+
+    private async Task<string> InstallWidgetPackageAsync(string widgetId, CancellationToken cancellationToken)
+    {
+        var widgetsRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "DesktopAIAgent",
+            "widgets");
+        var targetRoot = Path.Combine(widgetsRoot, widgetId);
+        var tempRoot = Path.Combine(Path.GetTempPath(), "DesktopAIAgent", "widget-cache");
+        Directory.CreateDirectory(tempRoot);
+        Directory.CreateDirectory(widgetsRoot);
+
+        var archivePath = Path.Combine(tempRoot, "dist-widgets.zip");
+        using (var response = await _httpClient.GetAsync(WidgetReleaseZipUrl, cancellationToken))
+        {
+            response.EnsureSuccessStatusCode();
+            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var archiveStream = File.Create(archivePath);
+            await responseStream.CopyToAsync(archiveStream, cancellationToken);
+        }
+
+        var prefix = $"ai-dist-widgets/widgets/{widgetId}/";
+        if (Directory.Exists(targetRoot))
+        {
+            Directory.Delete(targetRoot, true);
+        }
+
+        Directory.CreateDirectory(targetRoot);
+        using var archive = ZipFile.OpenRead(archivePath);
+        foreach (var entry in archive.Entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!entry.FullName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var relativePath = entry.FullName[prefix.Length..];
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                continue;
+            }
+
+            var destinationPath = Path.Combine(targetRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            var destinationDirectory = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(destinationDirectory))
+            {
+                Directory.CreateDirectory(destinationDirectory);
+            }
+
+            if (entry.FullName.EndsWith("/", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            entry.ExtractToFile(destinationPath, overwrite: true);
+        }
+
+        var manifestPath = Path.Combine(targetRoot, "widget.json");
+        if (!File.Exists(manifestPath))
+        {
+            throw new InvalidOperationException($"Widget package {widgetId} was not found in dist-widgets release.");
+        }
+
+        StartupLogService.Info($"Widget package installed from remote release: {widgetId}");
+        return targetRoot;
     }
 }

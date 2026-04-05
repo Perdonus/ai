@@ -1,0 +1,17 @@
+{
+  "id": "open-settings-page",
+  "name": "Open Settings Page",
+  "description": "Open a Windows settings page through the ms-settings protocol.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this when the user wants a Windows settings page opened directly.",
+  "parameter_hints": {
+    "page": "settings page token after ms-settings:, for example bluetooth or display"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "start \"\" \"ms-settings:{{page}}\""
+  ],
+  "version": "0.1.0"
+}

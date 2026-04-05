@@ -1,0 +1,17 @@
+{
+  "id": "tasklist-filter",
+  "name": "Tasklist Filter",
+  "description": "Filter running Windows processes by a name fragment.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this when you need to check whether a process is already running before trying to launch or stop it.",
+  "parameter_hints": {
+    "pattern": "process name fragment, for example firefox or notepad"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "tasklist | findstr /i \"{{pattern}}\""
+  ],
+  "version": "0.1.0"
+}

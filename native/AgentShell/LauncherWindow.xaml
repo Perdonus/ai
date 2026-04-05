@@ -15,7 +15,8 @@
             BorderBrush="Transparent"
             BorderThickness="0"
             CornerRadius="30"
-            HorizontalAlignment="Stretch">
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Top">
             <Grid RowDefinitions="Auto,Auto">
                 <TextBox
                     x:Name="PromptBox"

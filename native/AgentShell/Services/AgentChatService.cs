@@ -12,21 +12,22 @@ public sealed class AgentChatService
 {
     private static readonly TimeSpan[] RetryDelays =
     [
-        TimeSpan.FromSeconds(10),
+        TimeSpan.FromSeconds(12),
         TimeSpan.FromSeconds(20),
-        TimeSpan.FromSeconds(35)
+        TimeSpan.FromSeconds(36)
     ];
 
     private static readonly IReadOnlyDictionary<string, TimeSpan> RequestSpacingByProvider = new Dictionary<string, TimeSpan>(StringComparer.OrdinalIgnoreCase)
     {
-        ["sosiskibot"] = TimeSpan.FromSeconds(4),
-        ["openrouter"] = TimeSpan.FromSeconds(3),
-        ["huggingface"] = TimeSpan.FromSeconds(3),
-        ["gemini"] = TimeSpan.FromSeconds(2.5),
-        ["mistral"] = TimeSpan.FromSeconds(2.5),
-        ["openai"] = TimeSpan.FromSeconds(2),
+        ["sosiskibot"] = TimeSpan.FromSeconds(10),
+        ["openrouter"] = TimeSpan.FromSeconds(8),
+        ["huggingface"] = TimeSpan.FromSeconds(8),
+        ["gemini"] = TimeSpan.FromSeconds(6),
+        ["mistral"] = TimeSpan.FromSeconds(6),
+        ["openai"] = TimeSpan.FromSeconds(5),
         ["local"] = TimeSpan.Zero
     };
+    private static readonly TimeSpan RateLimitSafetyPad = TimeSpan.FromSeconds(10);
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> ProviderLocks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, DateTimeOffset> ProviderAvailableAt = new(StringComparer.OrdinalIgnoreCase);
 
@@ -316,7 +317,7 @@ public sealed class AgentChatService
                 var delay = GetRetryDelay(response, body, attempt);
                 if (response.StatusCode == HttpStatusCode.TooManyRequests)
                 {
-                    ReserveProvider(throttleKey, delay + GetRequestSpacing(throttleKey));
+                    ReserveProvider(throttleKey, delay + GetRequestSpacing(throttleKey) + RateLimitSafetyPad);
                     throw new ProviderRateLimitException(throttleKey, delay, body);
                 }
 
@@ -416,9 +417,17 @@ public sealed class AgentChatService
 
     private static TimeSpan GetRequestSpacing(string throttleKey)
     {
-        return RequestSpacingByProvider.TryGetValue(throttleKey, out var spacing)
+        if (string.Equals(throttleKey, "local", StringComparison.OrdinalIgnoreCase))
+        {
+            return TimeSpan.Zero;
+        }
+
+        var minimum = RequestSpacingByProvider.TryGetValue(throttleKey, out var spacing)
             ? spacing
-            : TimeSpan.FromSeconds(2.5);
+            : TimeSpan.FromSeconds(5);
+        var minimumSeconds = Math.Max(5, (int)Math.Ceiling(minimum.TotalSeconds));
+        var randomizedSeconds = Random.Shared.Next(minimumSeconds, 21);
+        return TimeSpan.FromSeconds(randomizedSeconds);
     }
 
     private static async Task WaitForProviderAvailabilityAsync(string throttleKey, CancellationToken cancellationToken)

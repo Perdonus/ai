@@ -1,0 +1,18 @@
+{
+  "id": "move-file",
+  "name": "Move File",
+  "description": "Move or rename a file.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this when you need to rename or relocate a file on disk.",
+  "parameter_hints": {
+    "source": "absolute source file path",
+    "destination": "absolute destination file path"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "move /y \"{{source}}\" \"{{destination}}\""
+  ],
+  "version": "0.1.0"
+}

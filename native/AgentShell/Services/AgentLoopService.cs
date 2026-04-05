@@ -17,6 +17,8 @@ public sealed class AgentLoopService
     private readonly DesktopContextService _context = new();
     private readonly ClipboardService _clipboard = new();
     private readonly RuntimeToolService _runtimeTools = new();
+    private readonly RuntimeCatalogService _runtimeCatalog = App.RuntimeCatalog;
+    private readonly RuntimeWidgetService _widgets = new();
     private readonly TesseractOcrService _ocr = new();
     private readonly McpThinkingService _mcpThinking = new();
 
@@ -32,12 +34,15 @@ public sealed class AgentLoopService
         var visibleThoughts = new StringBuilder();
         string finalAnswer = string.Empty;
         var runtimeTools = await _runtimeTools.LoadAsync();
+        var runtimeWidgets = await _runtimeCatalog.LoadWidgetsAsync();
         var toolPrompt = _runtimeTools.BuildToolPrompt(runtimeTools);
+        var widgetPrompt = _runtimeCatalog.BuildWidgetPrompt(runtimeWidgets);
         var simpleOpenRequest = LooksLikeSimpleOpenRequest(prompt);
+        var directDesktopRequest = simpleOpenRequest || LooksLikeDirectBrowserSearchRequest(prompt);
         var repeatedActionCount = 0;
         var lastActionSignature = string.Empty;
 
-        if (simpleOpenRequest)
+        if (directDesktopRequest)
         {
             var directResult = await _desktop.TryHandleAsync(prompt, cancellationToken);
             if (directResult is not null)
@@ -76,7 +81,9 @@ public sealed class AgentLoopService
 
                 if (config.Models.PrimaryMcpThinking || config.Models.AnalysisMcpThinking)
                 {
-                    mcpSupplement = _mcpThinking.BuildSupplement(prompt, step, context, clipboardPreview, ocrText, runtimeTools);
+                    mcpSupplement = _mcpThinking.BuildSupplement(prompt, step, context, clipboardPreview, ocrText, runtimeTools, runtimeWidgets);
+                    AppendThought(visibleThoughts, "MCP: сверила следующий ход через локальный desktop overlay.");
+                    progress?.Report(new AgentLoopProgress("Сверяю ход через MCP", visibleThoughts.ToString(), finalAnswer));
                 }
 
                 if (ShouldRunSeparateAnalysis(config, analysisRoute, step))
@@ -115,6 +122,7 @@ public sealed class AgentLoopService
                     analysis,
                     config.Models.PrimaryMcpThinking ? mcpSupplement : string.Empty,
                     toolPrompt,
+                    widgetPrompt,
                     cancellationToken);
 
                 StartupLogService.Info(
@@ -224,10 +232,11 @@ public sealed class AgentLoopService
         string analysis,
         string mcpThinking,
         string toolPrompt,
+        string widgetPrompt,
         CancellationToken cancellationToken)
     {
         var route = _chat.ResolveVisionRoute(config);
-        var systemPrompt = BuildDecisionSystemPrompt(toolPrompt, !string.IsNullOrWhiteSpace(mcpThinking));
+        var systemPrompt = BuildDecisionSystemPrompt(toolPrompt, widgetPrompt, !string.IsNullOrWhiteSpace(mcpThinking));
         var withScreenshotPrompt = BuildDecisionUserPrompt(
             session,
             prompt,
@@ -301,6 +310,12 @@ public sealed class AgentLoopService
                 EnsureTarget(action, "open_path");
                 await _desktop.OpenPathAsync(action.Target!, cancellationToken);
                 return $"Открыла путь {action.Target}";
+            case "focus_window":
+                EnsureTarget(action, "focus_window");
+                var focused = await _desktop.FocusWindowAsync(action.Target!, cancellationToken);
+                return focused
+                    ? $"Сфокусировала окно {action.Target}"
+                    : $"Не нашла окно {action.Target}";
             case "type_text":
                 EnsureText(action, "type_text");
                 _input.TypeText(action.Text!);
@@ -402,6 +417,15 @@ public sealed class AgentLoopService
                 EnsureTarget(action, "run_tool");
                 var toolOutput = await _runtimeTools.ExecuteAsync(action.Target!, action.Arguments, cancellationToken);
                 return $"Запустила тулз {action.Target}: {toolOutput}";
+            case "open_widget":
+                EnsureTarget(action, "open_widget");
+                var widgetLaunch = await _widgets.LaunchByIdAsync(action.Target!, cancellationToken);
+                return widgetLaunch;
+            case "send_widget_data":
+                EnsureTarget(action, "send_widget_data");
+                EnsureText(action, "send_widget_data");
+                var widgetResult = await _widgets.SendDataAsync(action.Target!, action.Text!, cancellationToken);
+                return widgetResult;
             default:
                 throw new InvalidOperationException($"Unsupported agent action: {action.Type}");
         }
@@ -435,72 +459,70 @@ MCP thinking:
 """;
     }
 
-    private static string BuildDecisionSystemPrompt(string toolPrompt, bool mcpThinkingEnabled)
+    private static string BuildDecisionSystemPrompt(string toolPrompt, string widgetPrompt, bool mcpThinkingEnabled)
     {
         var mcpRule = mcpThinkingEnabled
-            ? "Для этого шага включен MCP thinking overlay: используй его как дополнительную локальную схему планирования, но наружу всё равно отвечай только JSON."
+            ? "MCP thinking overlay is enabled for this step. Use it as extra planning signal, but still return only JSON."
             : string.Empty;
 
         return $$"""
-Ты не текстовый чат-бот. Ты desktop-агент на Windows, который реально управляет ПК.
-Ты видишь экран, анализируешь контекст, помнишь текущую сессию и делаешь действия руками: мышью, клавиатурой, буфером обмена, запуском приложений, открытием файлов, сайтов и runtime-тулзов.
-Все твои действия должны быть визуальными и пошаговыми: сначала оцени состояние, потом сделай один шаг, потом снова оцени.
-Если пользователь просит что-то написать, стереть, выделить, вставить, нарисовать, открыть, перетащить, прокрутить, заменить, очистить или заполнить, делай это через действия ввода и навигации.
-Если тебе не хватает обязательных данных от пользователя, не зацикливайся. Используй await_user и остановись до следующего сообщения пользователя.
-Если нужны логин, пароль, код, captcha, подтверждение, выбор пользователя или другие данные, которые нельзя додумать, используй await_user сразу и не повторяй одинаковые шаги.
-Если внешний сервис начал ограничивать запросы или не отвечает, не спамь повтором. Остановись с понятным статусом.
-Ты важный системный агент, а не обычная чат-модель. Если задачу нужно делать на ПК руками, действуй, а не объясняй словами.
+You are a Windows desktop agent on a real PC, not a normal chat bot.
+You can see screenshots, read OCR text, inspect window geometry, remember the current session, and act through mouse, keyboard, clipboard, browser, files, runtime tools, and runtime widgets.
+When a task must be done on the PC, do it through actions instead of replying with plain chat text.
+Work in short visible loops: inspect state, do one observable action, inspect again.
+Geometry matters:
+- x/y/x2/y2 are relative to the attached screenshot.
+- The prompt also contains screenshot origin on the desktop, current monitor bounds, work area, cursor position, visible window rectangles, and window centers.
+- Use that geometry to reason about sliders, edges, drag paths, screen proportions, and which monitor you are on.
+- If a control is ambiguous, prefer observe before clicking.
+If required user data is missing (login, password, code, captcha, token, confirmation, personal choice), use await_user immediately and stop.
+If the provider is rate-limited or the task cannot continue safely, stop cleanly instead of looping.
+If a relevant widget is already installed, prefer open_widget or send_widget_data instead of pretending the widget does not exist.
 {{mcpRule}}
-Отвечай строго JSON-объектом без markdown, комментариев и лишнего текста.
+Return only one JSON object and nothing else. No markdown.
 
-Формат:
+JSON schema:
 {
-  "thought": "краткая мысль на русском",
+  "thought": "brief reasoning in Russian",
   "action": {
-    "type": "observe|await_user|open_app|open_browser|open_url|open_path|type_text|set_clipboard|paste_clipboard|copy_selection|press_key|key_combo|key_down|key_up|hold_key|mouse_move|mouse_down|mouse_up|mouse_hold|click|right_click|double_click|drag|scroll|wait|run_tool|finish",
-    "target": "строка или null",
-    "text": "строка или null",
-    "key": "строка или null",
-    "keys": ["строки"] или null,
-    "button": "left|right или null",
-    "x": число или null,
-    "y": число или null,
-    "x2": число или null,
-    "y2": число или null,
-    "delta": число или null,
-    "milliseconds": число или null,
-    "arguments": {"key":"value"} или null
+    "type": "observe|await_user|open_app|open_browser|open_url|open_path|focus_window|type_text|set_clipboard|paste_clipboard|copy_selection|press_key|key_combo|key_down|key_up|hold_key|mouse_move|mouse_down|mouse_up|mouse_hold|click|right_click|double_click|drag|scroll|wait|run_tool|open_widget|send_widget_data|finish",
+    "target": "string or null",
+    "text": "string or null",
+    "key": "string or null",
+    "keys": ["strings"] or null,
+    "button": "left|right or null",
+    "x": number or null,
+    "y": number or null,
+    "x2": number or null,
+    "y2": number or null,
+    "delta": number or null,
+    "milliseconds": number or null,
+    "arguments": {"key":"value"} or null
   },
-  "final_response": "строка или null"
+  "final_response": "string or null"
 }
 
-Правила:
-- Делай ровно одно действие за шаг.
-- Если нужно просто посмотреть или перепроверить состояние, используй observe.
-- Если нужна информация, секрет, код, подтверждение, выбор или данные, которые должен дать пользователь, используй await_user.
-- Если задача завершена, используй finish и дай final_response.
-- Если надо открыть приложение, используй open_app.
-- Если надо просто открыть браузер или вкладку с сайтом, используй open_browser или open_url.
-- Если надо открыть сайт, используй open_url.
-- Если надо открыть файл или папку, используй open_path.
-- Если надо ввести текст в активное окно, используй type_text.
-- Для буфера обмена используй set_clipboard, paste_clipboard и copy_selection.
-- Для клавиатуры используй press_key, key_combo, key_down, key_up, hold_key.
-- Для мыши используй mouse_move, mouse_down, mouse_up, click, right_click, double_click, drag, scroll.
-- Если нужно просто удерживать кнопку мыши на месте, используй mouse_hold.
-- Для рисования и выделения чаще всего подходят drag, mouse_down/mouse_up и клавиши-модификаторы.
-- Координаты x/y/x2/y2 относительные к присланному скриншоту.
-- Не повторяй один и тот же шаг бесконечно. Если упёрлась в необходимость данных или подтверждения, остановись через await_user.
-- Если пользователь просил только открыть приложение, сайт, файл или папку, после успешного открытия заверши задачу.
-- Помни, что ты агент на реальном ПК. Не отвечай как обычный чат без действий, если задачу нужно выполнить руками.
+Rules:
+- Do exactly one action per step.
+- Use observe when you need to verify screen state before acting.
+- Use finish only when the desktop task is actually complete.
+- Use focus_window to switch to an already open app or document.
+- Use open_browser or open_url for browser navigation.
+- Use drag, mouse_down/mouse_up, and modifier keys for selection, drawing, slider movement, and resize gestures.
+- For browser tasks, prefer real keyboard and mouse actions after the browser is open.
+- Do not repeat the same ineffective action forever. If you are blocked, use await_user.
+- If the user asked only to open something simple and it is open, finish.
+- Think and final_response should be in Russian.
 
-Примеры:
-- "Открой браузер" -> open_browser, потом finish.
-- "Нажми Ctrl+L" -> key_combo с keys ["CTRL","L"].
-- "Перетащи ползунок вправо" -> observe, потом drag с координатами.
-- "Поиграем в блокноте" -> открыть блокнот, дождаться его, печатать туда, а не отвечать обычным чат-текстом.
+Examples:
+- "Открой браузер и найди погоду" -> open_browser or open_url, then key_combo/type_text if needed, then finish.
+- "Переключись в блокнот" -> focus_window target="notepad".
+- "Открой виджет погоды" -> open_widget target="weather-orbit".
+- "Обнови данные виджета" -> send_widget_data with widget id in target and payload in text.
 
 {{toolPrompt}}
+
+{{widgetPrompt}}
 """;
     }
 
@@ -518,27 +540,28 @@ MCP thinking:
     {
         var history = string.Join("\n", session.History.TakeLast(12));
         return $"""
-Текущий запрос пользователя: {prompt}
-Номер шага: {step}
-Размер скриншота: {snapshot.Width}x{snapshot.Height}
-Скриншот приложен: {(screenshotAttached ? "да" : "нет")}
+Current user request: {prompt}
+Step number: {step}
+Screenshot size: {snapshot.Width}x{snapshot.Height}
+Screenshot top-left on desktop: {snapshot.Left},{snapshot.Top}
+Screenshot attached: {(screenshotAttached ? "yes" : "no")}
 
-История этой сессии:
-{history}
+Session history:
+{(string.IsNullOrWhiteSpace(history) ? "(empty)" : history)}
 
 Desktop context:
 {context.ToPromptString(clipboardPreview)}
 
-OCR со скриншота:
+OCR from screenshot:
 {FormatSupplement(ocrText)}
 
-Дополнительный анализ:
+Extra analysis:
 {FormatSupplement(analysis)}
 
 MCP thinking:
 {FormatSupplement(mcpThinking)}
 
-Выбери ОДИН следующий шаг.
+Pick exactly one next step.
 """;
     }
 
@@ -590,6 +613,28 @@ MCP thinking:
                normalized.StartsWith("запусти ", StringComparison.OrdinalIgnoreCase) ||
                normalized.StartsWith("open ", StringComparison.OrdinalIgnoreCase) ||
                normalized.StartsWith("launch ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeDirectBrowserSearchRequest(string prompt)
+    {
+        var normalized = Regex.Replace(prompt.Trim().ToLowerInvariant(), "\\s+", " ");
+        if (normalized.Length is < 12 or > 220)
+        {
+            return false;
+        }
+
+        var hasBrowser = normalized.Contains("брауз", StringComparison.OrdinalIgnoreCase) ||
+                         normalized.Contains("browser", StringComparison.OrdinalIgnoreCase) ||
+                         normalized.Contains("chrome", StringComparison.OrdinalIgnoreCase) ||
+                         normalized.Contains("firefox", StringComparison.OrdinalIgnoreCase) ||
+                         normalized.Contains("edge", StringComparison.OrdinalIgnoreCase) ||
+                         normalized.Contains("brave", StringComparison.OrdinalIgnoreCase);
+        var hasSearch = normalized.Contains("поиск", StringComparison.OrdinalIgnoreCase) ||
+                        normalized.Contains("найди", StringComparison.OrdinalIgnoreCase) ||
+                        normalized.Contains("search", StringComparison.OrdinalIgnoreCase) ||
+                        normalized.Contains("find ", StringComparison.OrdinalIgnoreCase);
+
+        return hasBrowser && hasSearch;
     }
 
     private static bool ShouldRunSeparateAnalysis(ShellConfig config, ModelRoute? analysisRoute, int step)
@@ -727,6 +772,13 @@ MCP thinking:
             action.Target = string.IsNullOrWhiteSpace(action.Target) ? "https://www.google.com" : action.Target;
         }
 
+        if ((action.Type == "open_app" || action.Type == "focus_window" || action.Type == "open_widget" || action.Type == "run_tool") &&
+            string.IsNullOrWhiteSpace(action.Target) &&
+            !string.IsNullOrWhiteSpace(action.Text))
+        {
+            action.Target = action.Text;
+        }
+
         if ((action.Type == "press_key" || action.Type == "hold_key") &&
             string.IsNullOrWhiteSpace(action.Key) &&
             !string.IsNullOrWhiteSpace(action.Target))
@@ -739,6 +791,25 @@ MCP thinking:
             !string.IsNullOrWhiteSpace(action.Target))
         {
             action.Text = action.Target;
+        }
+
+        if (action.Type == "send_widget_data")
+        {
+            if (string.IsNullOrWhiteSpace(action.Target) &&
+                action.Arguments is not null &&
+                action.Arguments.TryGetValue("widget", out var widgetId) &&
+                !string.IsNullOrWhiteSpace(widgetId))
+            {
+                action.Target = widgetId;
+            }
+
+            if (string.IsNullOrWhiteSpace(action.Text) &&
+                action.Arguments is not null &&
+                action.Arguments.TryGetValue("payload", out var payload) &&
+                !string.IsNullOrWhiteSpace(payload))
+            {
+                action.Text = payload;
+            }
         }
 
         if (action.Type == "key_combo")
@@ -774,6 +845,9 @@ MCP thinking:
         {
             "open_application" or "launch_app" or "launch_application" => "open_app",
             "open_browser_tab" or "launch_browser" => "open_browser",
+            "activate_window" or "switch_window" or "focus_app" => "focus_window",
+            "launch_widget" or "show_widget" or "open_runtime_widget" => "open_widget",
+            "widget_data" or "update_widget" or "send_widget_payload" => "send_widget_data",
             "type" or "write_text" or "input_text" or "enter_text" => "type_text",
             "press" or "keypress" => "press_key",
             "shortcut" or "hotkey" or "keyboard_combo" or "press_keys" => "key_combo",

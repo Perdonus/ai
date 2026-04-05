@@ -204,6 +204,7 @@ public sealed class RuntimeToolService
     private static IEnumerable<string> RuntimeRoots()
     {
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DesktopAIAgent", "tools");
+        yield return Path.Combine(AppContext.BaseDirectory, "tools");
         yield return Path.Combine("Z:\\ai", "tools");
     }
 

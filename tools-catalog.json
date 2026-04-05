@@ -126,6 +126,42 @@
       "name": "Cargo Build",
       "description": "Build a Rust project with cargo.",
       "folder": "tools/cargo-build"
+    },
+    {
+      "id": "tasklist-filter",
+      "name": "Tasklist Filter",
+      "description": "Filter running Windows processes by a name fragment.",
+      "folder": "tools/tasklist-filter"
+    },
+    {
+      "id": "where-exe",
+      "name": "Where EXE",
+      "description": "Locate an executable available in PATH.",
+      "folder": "tools/where-exe"
+    },
+    {
+      "id": "copy-file",
+      "name": "Copy File",
+      "description": "Copy one file to another path.",
+      "folder": "tools/copy-file"
+    },
+    {
+      "id": "move-file",
+      "name": "Move File",
+      "description": "Move or rename a file.",
+      "folder": "tools/move-file"
+    },
+    {
+      "id": "find-text-in-files",
+      "name": "Find Text In Files",
+      "description": "Search for text recursively inside files under a root directory.",
+      "folder": "tools/find-text-in-files"
+    },
+    {
+      "id": "open-settings-page",
+      "name": "Open Settings Page",
+      "description": "Open a Windows settings page through the ms-settings protocol.",
+      "folder": "tools/open-settings-page"
     }
   ]
 }

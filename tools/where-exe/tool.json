@@ -1,0 +1,17 @@
+{
+  "id": "where-exe",
+  "name": "Where EXE",
+  "description": "Locate an executable available in PATH.",
+  "kind": "command",
+  "entry": "cmd.exe",
+  "system_prompt": "Use this when you need the resolved path to an executable before launching or scripting it.",
+  "parameter_hints": {
+    "name": "executable name, for example git.exe or python.exe"
+  },
+  "args_template": [
+    "/d",
+    "/c",
+    "where {{name}}"
+  ],
+  "version": "0.1.0"
+}
