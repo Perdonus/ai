@@ -7,29 +7,28 @@
     xmlns:models="using:AgentShell.Models"
     xmlns:services="using:AgentShell.Services"
     mc:Ignorable="d">
-    <Window.Resources>
-        <services:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
-        <DataTemplate x:Key="ModelChoiceTemplate">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding DisplayName}" Foreground="White" VerticalAlignment="Center" />
-                <Border
-                    Grid.Column="1"
-                    Margin="10,0,0,0"
-                    Padding="8,2"
-                    Background="#214F3E"
-                    CornerRadius="999"
-                    Visibility="{Binding ShowThinkingTag, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <TextBlock Text="{Binding ThinkingTagText}" FontSize="11" Foreground="#DFFFE7" />
-                </Border>
-            </Grid>
-        </DataTemplate>
-    </Window.Resources>
-
     <Grid Background="#09111A">
+        <Grid.Resources>
+            <services:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+            <DataTemplate x:Key="ModelChoiceTemplate">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding DisplayName}" Foreground="White" VerticalAlignment="Center" />
+                    <Border
+                        Grid.Column="1"
+                        Margin="10,0,0,0"
+                        Padding="8,2"
+                        Background="#214F3E"
+                        CornerRadius="999"
+                        Visibility="{Binding ShowThinkingTag, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Text="{Binding ThinkingTagText}" FontSize="11" Foreground="#DFFFE7" />
+                    </Border>
+                </Grid>
+            </DataTemplate>
+        </Grid.Resources>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="240" />
             <ColumnDefinition Width="*" />
