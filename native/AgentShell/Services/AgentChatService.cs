@@ -12,22 +12,22 @@ public sealed class AgentChatService
 {
     private static readonly TimeSpan[] RetryDelays =
     [
-        TimeSpan.FromSeconds(12),
-        TimeSpan.FromSeconds(20),
-        TimeSpan.FromSeconds(36)
+        TimeSpan.FromSeconds(15),
+        TimeSpan.FromSeconds(28),
+        TimeSpan.FromSeconds(45)
     ];
 
     private static readonly IReadOnlyDictionary<string, TimeSpan> RequestSpacingByProvider = new Dictionary<string, TimeSpan>(StringComparer.OrdinalIgnoreCase)
     {
-        ["sosiskibot"] = TimeSpan.FromSeconds(10),
-        ["openrouter"] = TimeSpan.FromSeconds(8),
-        ["huggingface"] = TimeSpan.FromSeconds(8),
-        ["gemini"] = TimeSpan.FromSeconds(6),
-        ["mistral"] = TimeSpan.FromSeconds(6),
-        ["openai"] = TimeSpan.FromSeconds(5),
+        ["sosiskibot"] = TimeSpan.FromSeconds(14),
+        ["openrouter"] = TimeSpan.FromSeconds(12),
+        ["huggingface"] = TimeSpan.FromSeconds(12),
+        ["gemini"] = TimeSpan.FromSeconds(10),
+        ["mistral"] = TimeSpan.FromSeconds(10),
+        ["openai"] = TimeSpan.FromSeconds(8),
         ["local"] = TimeSpan.Zero
     };
-    private static readonly TimeSpan RateLimitSafetyPad = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan RateLimitSafetyPad = TimeSpan.FromSeconds(18);
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> ProviderLocks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, DateTimeOffset> ProviderAvailableAt = new(StringComparer.OrdinalIgnoreCase);
 

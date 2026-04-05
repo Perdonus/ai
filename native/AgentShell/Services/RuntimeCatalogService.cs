@@ -39,7 +39,15 @@ public sealed class RuntimeCatalogService
 
             if (widget.SupportsDataInput)
             {
-                builder.Append(" Supports send_widget_data with text payload.");
+                builder.Append(" Supports send_widget_data.");
+                if (!string.IsNullOrWhiteSpace(widget.DataInputHint))
+                {
+                    builder.Append(" Input: ").Append(widget.DataInputHint.Trim());
+                }
+                else
+                {
+                    builder.Append(" Input: free-form text or widget-specific JSON payload.");
+                }
             }
 
             builder.AppendLine();
@@ -78,6 +86,7 @@ public sealed class RuntimeCatalogService
                         Description = ReadString(rootElement, "description") ?? string.Empty,
                         HasSettings = rootElement.TryGetProperty("settings_schema", out _),
                         SupportsDataInput = rootElement.TryGetProperty("accepts_data_input", out var acceptsData) && acceptsData.GetBoolean(),
+                        DataInputHint = ReadString(rootElement, "input_hint") ?? string.Empty,
                         RootPath = directory
                     };
 

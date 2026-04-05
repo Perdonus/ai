@@ -1,0 +1,11 @@
+{
+  "id": "note-board",
+  "name": "Note Board",
+  "description": "Native sticky note widget with editable text and agent-driven updates.",
+  "kind": "native",
+  "entry_project": "NoteBoardWidget/NoteBoardWidget.csproj",
+  "entry_executable": "dist/NoteBoardWidget.exe",
+  "accepts_data_input": true,
+  "input_hint": "Plain text replaces the note body. JSON: {\"title\":\"...\",\"text\":\"...\",\"append\":true,\"prepend\":false,\"focus\":false,\"close\":false}.",
+  "version": "0.1.0"
+}

@@ -6,5 +6,6 @@
   "entry_project": "WeatherOrbitWidget/WeatherOrbitWidget.csproj",
   "entry_executable": "dist/WeatherOrbitWidget.exe",
   "accepts_data_input": true,
+  "input_hint": "Plain text sets a weather location. JSON: {\"location\":\"Кудрово\"} or {\"latitude\":59.9,\"longitude\":30.5,\"label\":\"...\",\"close\":false}.",
   "version": "0.1.0"
 }

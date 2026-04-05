@@ -16,6 +16,8 @@ public partial class App : Application
 
     public static LocalLlamaService LocalLlama { get; } = new();
 
+    public static LongTermMemoryService LongTermMemory { get; } = new();
+
     private TrayIconService? _trayIcon;
 
     public App()
@@ -33,6 +35,8 @@ public partial class App : Application
             StartupLogService.Info("OnLaunched started.");
             ConfigService.EnsureLoaded();
             StartupLogService.Info("Configuration loaded.");
+            LongTermMemory.EnsureLoaded();
+            StartupLogService.Info("Long-term memory loaded.");
 
             Launcher = new LauncherWindow();
             StartupLogService.Info("Launcher window created.");

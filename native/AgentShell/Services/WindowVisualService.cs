@@ -37,7 +37,7 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         if (_appWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.SetBorderAndTitleBar(false, false);
-            presenter.IsAlwaysOnTop = false;
+            presenter.IsAlwaysOnTop = true;
             presenter.IsResizable = false;
             presenter.IsMaximizable = false;
             presenter.IsMinimizable = false;
@@ -354,7 +354,6 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
         var hwnd = WindowNative.GetWindowHandle(_window);
         _ = ShowWindow(hwnd, SwShow);
         _ = SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0, SwpNomove | SwpNosize);
-        _ = SetWindowPos(hwnd, HwndNotopmost, 0, 0, 0, 0, SwpNomove | SwpNosize);
         _ = BringWindowToTop(hwnd);
         _ = SetForegroundWindow(hwnd);
         _ = SetActiveWindow(hwnd);
@@ -380,7 +379,6 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     private const uint DwmColorNone = 0xFFFFFFFE;
     private const uint DwmWindowCornerPreferenceRound = 2;
     private static readonly nint HwndTopmost = new(-1);
-    private static readonly nint HwndNotopmost = new(-2);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     private static extern IntPtr GetWindowLongPtr(nint hWnd, int nIndex);

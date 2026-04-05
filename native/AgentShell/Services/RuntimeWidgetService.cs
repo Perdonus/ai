@@ -17,7 +17,8 @@ public sealed class RuntimeWidgetService
     public async Task<string> LaunchByIdAsync(string widgetId, CancellationToken cancellationToken)
     {
         var widget = await ResolveWidgetAsync(widgetId, cancellationToken);
-        return await TestLaunchAsync(widget.RootPath, cancellationToken);
+        var readyRoot = await EnsureLocalWidgetRootAsync(widget, cancellationToken);
+        return await TestLaunchAsync(readyRoot, cancellationToken);
     }
 
     public async Task<string> SendDataAsync(string widgetId, string payload, CancellationToken cancellationToken)
@@ -28,7 +29,8 @@ public sealed class RuntimeWidgetService
             throw new InvalidOperationException($"Widget {widgetId} does not accept data input.");
         }
 
-        var targetPath = Path.Combine(widget.RootPath, "widget-input.json");
+        var readyRoot = await EnsureLocalWidgetRootAsync(widget, cancellationToken);
+        var targetPath = Path.Combine(readyRoot, "widget-input.json");
         await File.WriteAllTextAsync(targetPath, payload, cancellationToken);
         return $"Widget {widgetId} data updated.";
     }
@@ -143,6 +145,21 @@ public sealed class RuntimeWidgetService
             .FirstOrDefault(item => string.Equals(item.Id, widgetId, StringComparison.OrdinalIgnoreCase));
 
         return widget ?? throw new InvalidOperationException($"Widget not found: {widgetId}");
+    }
+
+    private async Task<string> EnsureLocalWidgetRootAsync(RuntimeItem widget, CancellationToken cancellationToken)
+    {
+        var manifestPath = Path.Combine(widget.RootPath, "widget.json");
+        if (!File.Exists(manifestPath))
+        {
+            StartupLogService.Warn($"Widget manifest missing for {widget.Id}. Attempting remote widget install.");
+            return await InstallWidgetPackageAsync(widget.Id, cancellationToken);
+        }
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath, cancellationToken));
+        var root = document.RootElement;
+        var kind = (ReadString(root, "kind") ?? "html").Trim().ToLowerInvariant();
+        return await EnsureLaunchableRootAsync(widget.RootPath, root, widget.Id, kind, cancellationToken);
     }
 
     private async Task<string> EnsureLaunchableRootAsync(

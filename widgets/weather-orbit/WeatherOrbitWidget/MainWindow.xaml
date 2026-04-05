@@ -2,8 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Weather Orbit"
-        Width="420"
-        Height="330"
+        Width="472"
+        Height="478"
         WindowStyle="None"
         ResizeMode="NoResize"
         AllowsTransparency="True"
@@ -12,18 +12,18 @@
     <Border x:Name="Card"
             Margin="14"
             Padding="18"
-            CornerRadius="28"
+            CornerRadius="32"
             BorderBrush="#30FFFFFF"
             BorderThickness="1"
             MouseLeftButtonDown="Card_MouseLeftButtonDown">
         <Border.Effect>
-            <DropShadowEffect BlurRadius="28" ShadowDepth="0" Color="#B0000000" Opacity="0.45" />
+            <DropShadowEffect BlurRadius="30" ShadowDepth="0" Color="#C0000000" Opacity="0.48" />
         </Border.Effect>
         <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                 <GradientStop x:Name="GradientA" Offset="0" Color="#FF0E2940" />
-                <GradientStop x:Name="GradientB" Offset="0.55" Color="#FF235882" />
-                <GradientStop x:Name="GradientC" Offset="1" Color="#FF11263A" />
+                <GradientStop x:Name="GradientB" Offset="0.56" Color="#FF235882" />
+                <GradientStop x:Name="GradientC" Offset="1" Color="#FF101F32" />
             </LinearGradientBrush>
         </Border.Background>
 
@@ -39,44 +39,89 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <StackPanel>
-                    <TextBlock x:Name="LocationText" Text="Погода" FontSize="22" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock x:Name="UpdatedText" Text="Обновляю..." Foreground="#BBD0E5" FontSize="12" Margin="0,4,0,0" />
+                    <TextBlock x:Name="LocationText"
+                               Text="Погода"
+                               FontSize="22"
+                               FontWeight="SemiBold"
+                               Foreground="White"
+                               TextWrapping="Wrap" />
+                    <TextBlock x:Name="UpdatedText"
+                               Text="Подготавливаю виджет..."
+                               Margin="0,4,0,0"
+                               FontSize="12"
+                               Foreground="#BBD0E5"
+                               TextWrapping="Wrap" />
                 </StackPanel>
 
                 <Button x:Name="RefreshButton"
                         Grid.Column="1"
+                        Margin="12,0,0,0"
                         Padding="12,8"
                         Background="#18293B"
                         Foreground="White"
                         BorderThickness="0"
                         Content="Обновить"
                         Click="RefreshButton_Click" />
+
+                <Button x:Name="CloseButton"
+                        Grid.Column="2"
+                        Margin="10,0,0,0"
+                        Width="34"
+                        Height="34"
+                        Background="#16000000"
+                        Foreground="White"
+                        BorderThickness="0"
+                        FontSize="18"
+                        FontWeight="Bold"
+                        Content="×"
+                        Click="CloseButton_Click" />
             </Grid>
 
             <Grid Grid.Row="1" Margin="0,16,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="170" />
+                    <ColumnDefinition Width="176" />
                 </Grid.ColumnDefinitions>
 
-                <StackPanel>
-                    <TextBlock x:Name="TemperatureText" Text="--°" FontSize="56" FontWeight="Bold" Foreground="White" />
-                    <TextBlock x:Name="ConditionText" Text="Жду данные" FontSize="18" Foreground="#E8F3FF" />
-                    <TextBlock x:Name="FeelsLikeText" Text="Ощущается как --°" Margin="0,6,0,0" Foreground="#BBD0E5" />
+                <StackPanel Margin="0,0,14,0">
+                    <TextBlock x:Name="TemperatureText"
+                               Text="--°"
+                               FontSize="56"
+                               FontWeight="Bold"
+                               Foreground="White" />
+                    <TextBlock x:Name="ConditionText"
+                               Text="Жду данные"
+                               FontSize="18"
+                               Foreground="#F0F7FF"
+                               TextWrapping="Wrap" />
+                    <TextBlock x:Name="FeelsLikeText"
+                               Text="Ощущается как --°"
+                               Margin="0,8,0,0"
+                               Foreground="#C7D9EA"
+                               TextWrapping="Wrap" />
+                    <TextBlock x:Name="LocationMetaText"
+                               Text="Локация не выбрана"
+                               Margin="0,8,0,0"
+                               Foreground="#A8C1D8"
+                               TextWrapping="Wrap" />
                 </StackPanel>
 
-                <Border Grid.Column="1" Background="#19000000" CornerRadius="24" Padding="8">
+                <Border Grid.Column="1"
+                        Padding="8"
+                        Background="#18000000"
+                        CornerRadius="26">
                     <Canvas x:Name="SceneCanvas"
-                            Width="150"
-                            Height="126"
+                            Width="160"
+                            Height="144"
                             MouseLeftButtonDown="SceneCanvas_MouseLeftButtonDown">
                         <Ellipse x:Name="SkyGlow"
-                                 Width="120"
-                                 Height="120"
-                                 Canvas.Left="16"
+                                 Width="130"
+                                 Height="130"
+                                 Canvas.Left="14"
                                  Canvas.Top="4"
                                  Fill="#40A7E8FF"
                                  RenderTransformOrigin="0.5,0.5">
@@ -86,9 +131,9 @@
                         </Ellipse>
 
                         <Ellipse x:Name="SunOrb"
-                                 Width="54"
-                                 Height="54"
-                                 Canvas.Left="76"
+                                 Width="56"
+                                 Height="56"
+                                 Canvas.Left="82"
                                  Canvas.Top="16"
                                  Fill="#FFF6C65D"
                                  Stroke="#66FFF8E1"
@@ -104,9 +149,9 @@
                         </Ellipse>
 
                         <Ellipse x:Name="MoonOrb"
-                                 Width="44"
-                                 Height="44"
-                                 Canvas.Left="82"
+                                 Width="46"
+                                 Height="46"
+                                 Canvas.Left="86"
                                  Canvas.Top="18"
                                  Fill="#FFEAF2FF"
                                  Stroke="#66FFFFFF"
@@ -123,12 +168,12 @@
                         </Ellipse>
 
                         <Border x:Name="CloudOne"
-                                Width="86"
-                                Height="34"
-                                CornerRadius="17"
+                                Width="94"
+                                Height="36"
+                                CornerRadius="18"
                                 Background="#D8EAF7FF"
-                                Canvas.Left="28"
-                                Canvas.Top="52"
+                                Canvas.Left="18"
+                                Canvas.Top="58"
                                 MouseLeftButtonDown="Cloud_MouseLeftButtonDown"
                                 RenderTransformOrigin="0.5,0.5">
                             <Border.RenderTransform>
@@ -137,12 +182,12 @@
                         </Border>
 
                         <Border x:Name="CloudTwo"
-                                Width="62"
-                                Height="26"
-                                CornerRadius="13"
+                                Width="66"
+                                Height="28"
+                                CornerRadius="14"
                                 Background="#BFE2F8FF"
-                                Canvas.Left="72"
-                                Canvas.Top="72"
+                                Canvas.Left="86"
+                                Canvas.Top="80"
                                 MouseLeftButtonDown="Cloud_MouseLeftButtonDown"
                                 RenderTransformOrigin="0.5,0.5">
                             <Border.RenderTransform>
@@ -151,18 +196,20 @@
                         </Border>
 
                         <Ellipse x:Name="RainAccent"
-                                 Width="12"
-                                 Height="18"
-                                 Canvas.Left="92"
-                                 Canvas.Top="98"
+                                 Width="13"
+                                 Height="19"
+                                 Canvas.Left="100"
+                                 Canvas.Top="108"
                                  Fill="#90B4FFFF"
                                  Visibility="Collapsed" />
                     </Canvas>
                 </Border>
             </Grid>
 
-            <Grid Grid.Row="2" Margin="0,16,0,0">
+            <Grid Grid.Row="2" Margin="0,18,0,0">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
@@ -171,31 +218,59 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Border Background="#16000000" CornerRadius="18" Padding="12" Margin="0,0,5,5">
+                <Border Background="#16000000" CornerRadius="18" Padding="11" Margin="0,0,8,8">
                     <StackPanel>
                         <TextBlock Text="Ветер" Foreground="#A8C1D8" />
-                        <TextBlock x:Name="WindText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock x:Name="WindText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Column="1" Background="#16000000" CornerRadius="18" Padding="12" Margin="5,0,0,5">
+                <Border Grid.Column="1" Background="#16000000" CornerRadius="18" Padding="11" Margin="0,0,8,8">
                     <StackPanel>
                         <TextBlock Text="Влажность" Foreground="#A8C1D8" />
-                        <TextBlock x:Name="HumidityText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock x:Name="HumidityText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="1" Background="#16000000" CornerRadius="18" Padding="12" Margin="0,5,5,0">
+                <Border Grid.Column="2" Background="#16000000" CornerRadius="18" Padding="11" Margin="0,0,8,8">
+                    <StackPanel>
+                        <TextBlock Text="Давление" Foreground="#A8C1D8" />
+                        <TextBlock x:Name="PressureText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="3" Background="#16000000" CornerRadius="18" Padding="11" Margin="0,0,0,8">
+                    <StackPanel>
+                        <TextBlock Text="Облачность" Foreground="#A8C1D8" />
+                        <TextBlock x:Name="CloudText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Background="#16000000" CornerRadius="18" Padding="11" Margin="0,0,8,0">
                     <StackPanel>
                         <TextBlock Text="Осадки" Foreground="#A8C1D8" />
-                        <TextBlock x:Name="PrecipitationText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock x:Name="PrecipitationText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="1" Grid.Column="1" Background="#16000000" CornerRadius="18" Padding="12" Margin="5,5,0,0">
+                <Border Grid.Row="1" Grid.Column="1" Background="#16000000" CornerRadius="18" Padding="11" Margin="0,0,8,0">
                     <StackPanel>
-                        <TextBlock Text="Солнце" Foreground="#A8C1D8" />
-                        <TextBlock x:Name="SunTimeText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="Ощущается" Foreground="#A8C1D8" />
+                        <TextBlock x:Name="FeelsLikeTileText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Grid.Column="2" Background="#16000000" CornerRadius="18" Padding="11" Margin="0,0,8,0">
+                    <StackPanel>
+                        <TextBlock Text="Восход" Foreground="#A8C1D8" />
+                        <TextBlock x:Name="SunriseText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Grid.Column="3" Background="#16000000" CornerRadius="18" Padding="11">
+                    <StackPanel>
+                        <TextBlock Text="Закат" Foreground="#A8C1D8" />
+                        <TextBlock x:Name="SunsetText" Margin="0,4,0,0" Text="--" Foreground="White" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
             </Grid>
@@ -204,7 +279,7 @@
                        Grid.Row="3"
                        Margin="0,14,0,0"
                        Foreground="#C9D9E8"
-                       TextTrimming="CharacterEllipsis"
+                       TextWrapping="Wrap"
                        Text="Готово." />
         </Grid>
     </Border>

@@ -31,20 +31,26 @@ public sealed class AgentLoopService
     {
         session.History.Add($"Пользователь: {prompt}");
 
+        var memory = App.LongTermMemory;
+        memory.EnsureLoaded();
+        await memory.ApplyHeuristicsAsync(prompt, cancellationToken);
+        var resolvedPrompt = memory.RewritePromptWithDefaults(prompt);
+        var memoryPrompt = memory.BuildPrompt();
+
         var visibleThoughts = new StringBuilder();
         string finalAnswer = string.Empty;
         var runtimeTools = await _runtimeTools.LoadAsync();
         var runtimeWidgets = await _runtimeCatalog.LoadWidgetsAsync();
         var toolPrompt = _runtimeTools.BuildToolPrompt(runtimeTools);
         var widgetPrompt = _runtimeCatalog.BuildWidgetPrompt(runtimeWidgets);
-        var simpleOpenRequest = LooksLikeSimpleOpenRequest(prompt);
-        var directDesktopRequest = simpleOpenRequest || LooksLikeDirectBrowserSearchRequest(prompt);
+        var simpleOpenRequest = LooksLikeSimpleOpenRequest(resolvedPrompt);
+        var directDesktopRequest = simpleOpenRequest || LooksLikeDirectBrowserSearchRequest(resolvedPrompt);
         var repeatedActionCount = 0;
         var lastActionSignature = string.Empty;
 
         if (directDesktopRequest)
         {
-            var directResult = await _desktop.TryHandleAsync(prompt, cancellationToken);
+            var directResult = await _desktop.TryHandleAsync(resolvedPrompt, cancellationToken);
             if (directResult is not null)
             {
                 AppendThought(visibleThoughts, $"Локально распознала прямую команду: {directResult.Message}");
@@ -81,7 +87,7 @@ public sealed class AgentLoopService
 
                 if (config.Models.PrimaryMcpThinking || config.Models.AnalysisMcpThinking)
                 {
-                    mcpSupplement = _mcpThinking.BuildSupplement(prompt, step, context, clipboardPreview, ocrText, runtimeTools, runtimeWidgets);
+                    mcpSupplement = _mcpThinking.BuildSupplement(resolvedPrompt, step, context, clipboardPreview, ocrText, runtimeTools, runtimeWidgets);
                     AppendThought(visibleThoughts, "MCP: сверила следующий ход через локальный desktop overlay.");
                     progress?.Report(new AgentLoopProgress("Сверяю ход через MCP", visibleThoughts.ToString(), finalAnswer));
                 }
@@ -90,11 +96,12 @@ public sealed class AgentLoopService
                 {
                     var analysisPrompt = BuildAnalysisPrompt(
                         session,
-                        prompt,
+                        resolvedPrompt,
                         step,
                         context,
                         clipboardPreview,
                         ocrText,
+                        memoryPrompt,
                         config.Models.AnalysisMcpThinking ? mcpSupplement : string.Empty);
                     analysis = await _chat.RequestTextAsync(
                         config,
@@ -113,13 +120,14 @@ public sealed class AgentLoopService
                 var decision = await DecideNextActionAsync(
                     config,
                     session,
-                    prompt,
+                    resolvedPrompt,
                     step,
                     snapshot,
                     context,
                     clipboardPreview,
                     ocrText,
                     analysis,
+                    memoryPrompt,
                     config.Models.PrimaryMcpThinking ? mcpSupplement : string.Empty,
                     toolPrompt,
                     widgetPrompt,
@@ -230,6 +238,7 @@ public sealed class AgentLoopService
         string clipboardPreview,
         string ocrText,
         string analysis,
+        string memoryPrompt,
         string mcpThinking,
         string toolPrompt,
         string widgetPrompt,
@@ -246,6 +255,7 @@ public sealed class AgentLoopService
             clipboardPreview,
             ocrText,
             analysis,
+            memoryPrompt,
             mcpThinking,
             screenshotAttached: true);
 
@@ -275,6 +285,7 @@ public sealed class AgentLoopService
             clipboardPreview,
             ocrText,
             analysis,
+            memoryPrompt,
             mcpThinking,
             screenshotAttached: false);
 
@@ -426,6 +437,15 @@ public sealed class AgentLoopService
                 EnsureText(action, "send_widget_data");
                 var widgetResult = await _widgets.SendDataAsync(action.Target!, action.Text!, cancellationToken);
                 return widgetResult;
+            case "remember_memory":
+                EnsureTarget(action, "remember_memory");
+                EnsureText(action, "remember_memory");
+                await App.LongTermMemory.RememberAsync(action.Target!, action.Text!, "agent", cancellationToken);
+                return $"Р—Р°РїРѕРјРЅРёР»Р° {action.Target}: {action.Text}";
+            case "forget_memory":
+                EnsureTarget(action, "forget_memory");
+                await App.LongTermMemory.ForgetAsync(action.Target!, cancellationToken);
+                return $"Р—Р°Р±С‹Р»Р° {action.Target}";
             default:
                 throw new InvalidOperationException($"Unsupported agent action: {action.Type}");
         }
@@ -438,6 +458,7 @@ public sealed class AgentLoopService
         DesktopContextSnapshot context,
         string clipboardPreview,
         string ocrText,
+        string memoryPrompt,
         string mcpThinking)
     {
         return $"""
@@ -451,6 +472,9 @@ Desktop context:
 
 OCR со скриншота:
 {FormatSupplement(ocrText)}
+
+Long-term memory:
+{FormatSupplement(memoryPrompt)}
 
 MCP thinking:
 {FormatSupplement(mcpThinking)}
@@ -467,7 +491,7 @@ MCP thinking:
 
         return $$"""
 You are a Windows desktop agent on a real PC, not a normal chat bot.
-You can see screenshots, read OCR text, inspect window geometry, remember the current session, and act through mouse, keyboard, clipboard, browser, files, runtime tools, and runtime widgets.
+You can see screenshots, read OCR text, inspect window geometry, remember the current session, keep long-term memory, and act through mouse, keyboard, clipboard, browser, files, runtime tools, and runtime widgets.
 When a task must be done on the PC, do it through actions instead of replying with plain chat text.
 Work in short visible loops: inspect state, do one observable action, inspect again.
 Geometry matters:
@@ -478,6 +502,8 @@ Geometry matters:
 If required user data is missing (login, password, code, captcha, token, confirmation, personal choice), use await_user immediately and stop.
 If the provider is rate-limited or the task cannot continue safely, stop cleanly instead of looping.
 If a relevant widget is already installed, prefer open_widget or send_widget_data instead of pretending the widget does not exist.
+If a widget accepts data input, you may send plain text or JSON payloads exactly as the widget prompt describes.
+If the user reveals a stable preference, a default city, or any other durable fact, store it with remember_memory.
 {{mcpRule}}
 Return only one JSON object and nothing else. No markdown.
 
@@ -485,7 +511,7 @@ JSON schema:
 {
   "thought": "brief reasoning in Russian",
   "action": {
-    "type": "observe|await_user|open_app|open_browser|open_url|open_path|focus_window|type_text|set_clipboard|paste_clipboard|copy_selection|press_key|key_combo|key_down|key_up|hold_key|mouse_move|mouse_down|mouse_up|mouse_hold|click|right_click|double_click|drag|scroll|wait|run_tool|open_widget|send_widget_data|finish",
+    "type": "observe|await_user|open_app|open_browser|open_url|open_path|focus_window|type_text|set_clipboard|paste_clipboard|copy_selection|press_key|key_combo|key_down|key_up|hold_key|mouse_move|mouse_down|mouse_up|mouse_hold|click|right_click|double_click|drag|scroll|wait|run_tool|open_widget|send_widget_data|remember_memory|forget_memory|finish",
     "target": "string or null",
     "text": "string or null",
     "key": "string or null",
@@ -510,6 +536,8 @@ Rules:
 - Use open_browser or open_url for browser navigation.
 - Use drag, mouse_down/mouse_up, and modifier keys for selection, drawing, slider movement, and resize gestures.
 - For browser tasks, prefer real keyboard and mouse actions after the browser is open.
+- Use remember_memory target=<stable_key> text=<stable_value> for durable user facts and preferences.
+- Use send_widget_data when the request is better solved by updating an existing widget instead of typing into some unrelated app.
 - Do not repeat the same ineffective action forever. If you are blocked, use await_user.
 - If the user asked only to open something simple and it is open, finish.
 - Think and final_response should be in Russian.
@@ -518,6 +546,9 @@ Examples:
 - "Открой браузер и найди погоду" -> open_browser or open_url, then key_combo/type_text if needed, then finish.
 - "Переключись в блокнот" -> focus_window target="notepad".
 - "Открой виджет погоды" -> open_widget target="weather-orbit".
+- "Покажи погоду в Кудрово" -> open_widget target="weather-orbit", then send_widget_data target="weather-orbit" text="{\"location\":\"Кудрово\"}".
+- "Открой таймер на 5 минут" -> open_widget target="timer-bloom", then send_widget_data target="timer-bloom" text="{\"duration_seconds\":300,\"command\":\"start\"}".
+- "Создай заметку купить молоко" -> open_widget target="note-board", then send_widget_data target="note-board" text="купить молоко".
 - "Обнови данные виджета" -> send_widget_data with widget id in target and payload in text.
 
 {{toolPrompt}}
@@ -535,6 +566,7 @@ Examples:
         string clipboardPreview,
         string ocrText,
         string analysis,
+        string memoryPrompt,
         string mcpThinking,
         bool screenshotAttached)
     {
@@ -554,6 +586,9 @@ Desktop context:
 
 OCR from screenshot:
 {FormatSupplement(ocrText)}
+
+Long-term memory:
+{FormatSupplement(memoryPrompt)}
 
 Extra analysis:
 {FormatSupplement(analysis)}
@@ -779,6 +814,24 @@ Pick exactly one next step.
             action.Target = action.Text;
         }
 
+        if ((action.Type == "remember_memory" || action.Type == "forget_memory") &&
+            string.IsNullOrWhiteSpace(action.Target) &&
+            action.Arguments is not null &&
+            action.Arguments.TryGetValue("key", out var memoryKey) &&
+            !string.IsNullOrWhiteSpace(memoryKey))
+        {
+            action.Target = memoryKey;
+        }
+
+        if (action.Type == "remember_memory" &&
+            string.IsNullOrWhiteSpace(action.Text) &&
+            action.Arguments is not null &&
+            action.Arguments.TryGetValue("value", out var memoryValue) &&
+            !string.IsNullOrWhiteSpace(memoryValue))
+        {
+            action.Text = memoryValue;
+        }
+
         if ((action.Type == "press_key" || action.Type == "hold_key") &&
             string.IsNullOrWhiteSpace(action.Key) &&
             !string.IsNullOrWhiteSpace(action.Target))
@@ -848,6 +901,8 @@ Pick exactly one next step.
             "activate_window" or "switch_window" or "focus_app" => "focus_window",
             "launch_widget" or "show_widget" or "open_runtime_widget" => "open_widget",
             "widget_data" or "update_widget" or "send_widget_payload" => "send_widget_data",
+            "remember" or "save_memory" or "store_memory" or "save_fact" or "memorize" => "remember_memory",
+            "forget" or "delete_memory" or "remove_memory" => "forget_memory",
             "type" or "write_text" or "input_text" or "enter_text" => "type_text",
             "press" or "keypress" => "press_key",
             "shortcut" or "hotkey" or "keyboard_combo" or "press_keys" => "key_combo",

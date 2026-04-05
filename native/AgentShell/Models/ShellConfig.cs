@@ -133,5 +133,7 @@ public sealed class RuntimeItem
 
     public bool SupportsDataInput { get; set; }
 
+    public string DataInputHint { get; set; } = string.Empty;
+
     public string RootPath { get; set; } = string.Empty;
 }

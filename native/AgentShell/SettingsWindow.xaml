@@ -148,7 +148,7 @@
                             <CheckBox x:Name="PrimaryThinkingToggle" Content="Native thinking" Checked="ModelSetting_Changed" Unchecked="ModelSetting_Changed" />
                             <CheckBox x:Name="PrimaryMcpThinkingToggle" Content="MCP thinking" Checked="ModelSetting_Changed" Unchecked="ModelSetting_Changed" />
 
-                            <CheckBox x:Name="SeparateAnalysisToggle" Content="Использовать отдельную модель-планировщик" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
+                            <CheckBox x:Name="SeparateAnalysisToggle" Content="Использовать отдельную модель для планирования" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
                             <StackPanel x:Name="AnalysisPanel" Spacing="10">
                                 <ComboBox x:Name="AnalysisProviderCombo" SelectionChanged="AnalysisProviderCombo_SelectionChanged" />
                                 <ComboBox x:Name="AnalysisModelCombo" SelectionChanged="ModelSelectionChanged" ItemTemplate="{StaticResource ModelChoiceTemplate}" />

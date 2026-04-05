@@ -1,0 +1,103 @@
+<Window x:Class="StopwatchWaveWidget.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Stopwatch Wave"
+        Width="384"
+        Height="336"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False">
+    <Border x:Name="Card"
+            Margin="14"
+            Padding="18"
+            CornerRadius="30"
+            BorderBrush="#24FFFFFF"
+            BorderThickness="1"
+            MouseLeftButtonDown="Card_MouseLeftButtonDown">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="28" ShadowDepth="0" Color="#B8000000" Opacity="0.42" />
+        </Border.Effect>
+        <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Offset="0" Color="#FF121A33" />
+                <GradientStop Offset="0.54" Color="#FF2B4E92" />
+                <GradientStop Offset="1" Color="#FF111A34" />
+            </LinearGradientBrush>
+        </Border.Background>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="LabelText"
+                           Text="Секундомер"
+                           FontSize="22"
+                           FontWeight="SemiBold"
+                           Foreground="White" />
+                <Button Grid.Column="1"
+                        Width="32"
+                        Height="32"
+                        Background="#19000000"
+                        Foreground="White"
+                        BorderThickness="0"
+                        FontSize="18"
+                        FontWeight="Bold"
+                        Content="×"
+                        Click="CloseButton_Click" />
+            </Grid>
+
+            <TextBlock x:Name="TimeText"
+                       Grid.Row="1"
+                       Margin="0,18,0,0"
+                       Text="00:00.0"
+                       FontSize="42"
+                       FontWeight="Bold"
+                       Foreground="White"
+                       HorizontalAlignment="Center" />
+
+            <Grid Grid.Row="2" Margin="0,16,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Button Content="Старт" Click="StartButton_Click" />
+                <Button Grid.Column="1" Margin="8,0,0,0" Content="Стоп" Click="StopButton_Click" />
+                <Button Grid.Column="2" Margin="8,0,0,0" Content="Круг" Click="LapButton_Click" />
+                <Button Grid.Column="3" Margin="8,0,0,0" Content="Сброс" Click="ResetButton_Click" />
+            </Grid>
+
+            <Border Grid.Row="3"
+                    Margin="0,16,0,0"
+                    Padding="12"
+                    Background="#16000000"
+                    CornerRadius="20">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="Круги" Foreground="#C9D7F4" FontWeight="SemiBold" />
+                    <ListBox x:Name="LapList"
+                             Grid.Row="1"
+                             Margin="0,10,0,0"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Foreground="White" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

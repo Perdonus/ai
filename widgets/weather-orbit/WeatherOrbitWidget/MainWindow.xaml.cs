@@ -1,6 +1,8 @@
 using System.Globalization;
+using System.IO;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -20,20 +22,45 @@ public partial class MainWindow : Window
 
     private readonly DispatcherTimer _refreshTimer = new();
     private readonly Random _random = new();
+    private readonly SemaphoreSlim _inputLock = new(1, 1);
+    private FileSystemWatcher? _inputWatcher;
+    private string _widgetRoot = string.Empty;
+    private string _inputPath = string.Empty;
+    private string _statePath = string.Empty;
+    private WeatherLocation _selectedLocation = new("Москва", 55.7558, 37.6176);
+    private bool _closing;
 
     public MainWindow()
     {
         InitializeComponent();
         Loaded += MainWindow_Loaded;
+        Closed += MainWindow_Closed;
         _refreshTimer.Tick += RefreshTimer_Tick;
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        _widgetRoot = ResolveWidgetRoot();
+        _inputPath = Path.Combine(_widgetRoot, "widget-input.json");
+        _statePath = Path.Combine(_widgetRoot, "widget-state.json");
+        LoadState();
         PositionTopRight();
         BeginOpenAnimation();
         BeginAmbientAnimation();
-        await RefreshWeatherAsync();
+        StartInputWatcher();
+
+        if (!await ProcessPendingInputAsync())
+        {
+            await RefreshWeatherAsync();
+        }
+    }
+
+    private void MainWindow_Closed(object? sender, EventArgs e)
+    {
+        _refreshTimer.Stop();
+        _inputWatcher?.Dispose();
+        _httpClient.Dispose();
+        _inputLock.Dispose();
     }
 
     private async void RefreshTimer_Tick(object? sender, EventArgs e)
@@ -46,20 +73,88 @@ public partial class MainWindow : Window
         await RefreshWeatherAsync();
     }
 
+    private async void CloseButton_Click(object sender, RoutedEventArgs e)
+    {
+        await CloseAnimatedAsync();
+    }
+
+    private async Task<bool> ProcessPendingInputAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_inputPath) || !File.Exists(_inputPath))
+        {
+            return false;
+        }
+
+        await _inputLock.WaitAsync();
+        try
+        {
+            if (!File.Exists(_inputPath))
+            {
+                return false;
+            }
+
+            await Task.Delay(90);
+            var raw = (await File.ReadAllTextAsync(_inputPath)).Trim();
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                TryDelete(_inputPath);
+                return false;
+            }
+
+            var isJson = raw.StartsWith("{", StringComparison.Ordinal);
+            var payload = ParseInput(raw);
+            if (payload.Close || string.Equals(payload.Command, "close", StringComparison.OrdinalIgnoreCase))
+            {
+                TryDelete(_inputPath);
+                await CloseAnimatedAsync();
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(payload.Location))
+            {
+                _selectedLocation = new WeatherLocation(payload.Location.Trim(), payload.Latitude, payload.Longitude);
+                StatusText.Text = $"Локация обновлена: {_selectedLocation.Name}";
+            }
+            else if (payload.Latitude is not null && payload.Longitude is not null)
+            {
+                var label = string.IsNullOrWhiteSpace(payload.Label) ? "Пользовательская точка" : payload.Label.Trim();
+                _selectedLocation = new WeatherLocation(label, payload.Latitude, payload.Longitude);
+                StatusText.Text = $"Координаты обновлены: {label}";
+            }
+            else if (!isJson)
+            {
+                _selectedLocation = new WeatherLocation(raw, null, null);
+                StatusText.Text = $"Локация обновлена: {_selectedLocation.Name}";
+            }
+
+            TryDelete(_inputPath);
+            await RefreshWeatherAsync();
+            return true;
+        }
+        finally
+        {
+            _inputLock.Release();
+        }
+    }
+
     private async Task RefreshWeatherAsync()
     {
         RefreshButton.IsEnabled = false;
         try
         {
-            var snapshot = await LoadWeatherAsync();
+            StatusText.Text = "Обновляю погоду...";
+            var resolvedLocation = await ResolveLocationAsync(_selectedLocation);
+            var snapshot = await LoadWeatherAsync(resolvedLocation);
+            _selectedLocation = resolvedLocation;
             ApplySnapshot(snapshot);
+            await SaveStateAsync();
             _refreshTimer.Interval = TimeSpan.FromMinutes(20);
             _refreshTimer.Start();
         }
         catch (Exception ex)
         {
             StatusText.Text = "Не получилось обновить погоду.";
-            UpdatedText.Text = ex.Message.Length > 80 ? ex.Message[..80] : ex.Message;
+            UpdatedText.Text = ex.Message.Length > 110 ? ex.Message[..110] : ex.Message;
         }
         finally
         {
@@ -67,14 +162,46 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<WeatherSnapshot> LoadWeatherAsync()
+    private async Task<WeatherLocation> ResolveLocationAsync(WeatherLocation location)
     {
-        const double latitude = 55.7558;
-        const double longitude = 37.6176;
+        if (location.Latitude is not null && location.Longitude is not null)
+        {
+            return location;
+        }
+
+        var query = Uri.EscapeDataString(location.Name);
+        var url = $"https://geocoding-api.open-meteo.com/v1/search?name={query}&count=1&language=ru&format=json";
+        using var response = await _httpClient.GetAsync(url);
+        response.EnsureSuccessStatusCode();
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        if (!document.RootElement.TryGetProperty("results", out var results) ||
+            results.ValueKind != JsonValueKind.Array ||
+            results.GetArrayLength() == 0)
+        {
+            throw new InvalidOperationException($"Не нашла локацию: {location.Name}");
+        }
+
+        var first = results[0];
+        var name = ReadString(first, "name");
+        var admin = ReadString(first, "admin1");
+        var country = ReadString(first, "country");
+        var label = string.Join(", ", new[] { name, admin, country }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+        return new WeatherLocation(
+            string.IsNullOrWhiteSpace(label) ? location.Name : label,
+            ReadDouble(first, "latitude"),
+            ReadDouble(first, "longitude"));
+    }
+
+    private async Task<WeatherSnapshot> LoadWeatherAsync(WeatherLocation location)
+    {
+        var latitude = location.Latitude ?? throw new InvalidOperationException("Latitude is required.");
+        var longitude = location.Longitude ?? throw new InvalidOperationException("Longitude is required.");
         var url =
-            $"https://api.open-meteo.com/v1/forecast?latitude={latitude.ToString(CultureInfo.InvariantCulture)}" +
-            $"&longitude={longitude.ToString(CultureInfo.InvariantCulture)}" +
-            "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation,is_day" +
+            $"https://api.open-meteo.com/v1/forecast?latitude={latitude.Value.ToString(CultureInfo.InvariantCulture)}" +
+            $"&longitude={longitude.Value.ToString(CultureInfo.InvariantCulture)}" +
+            "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation,is_day,pressure_msl,cloud_cover" +
             "&daily=sunrise,sunset" +
             "&forecast_days=1" +
             "&timezone=auto";
@@ -91,11 +218,16 @@ public partial class MainWindow : Window
 
         return new WeatherSnapshot
         {
+            Location = location.Name,
+            Latitude = latitude.Value,
+            Longitude = longitude.Value,
             TemperatureC = ReadDouble(current, "temperature_2m"),
             FeelsLikeC = ReadDouble(current, "apparent_temperature"),
             Humidity = ReadInt(current, "relative_humidity_2m"),
             WindSpeed = ReadDouble(current, "wind_speed_10m"),
             WindDirection = DescribeWindDirection(ReadInt(current, "wind_direction_10m")),
+            Pressure = ReadDouble(current, "pressure_msl"),
+            CloudCover = ReadInt(current, "cloud_cover"),
             Precipitation = ReadDouble(current, "precipitation"),
             Sunrise = ReadFirstString(daily, "sunrise"),
             Sunset = ReadFirstString(daily, "sunset"),
@@ -107,17 +239,20 @@ public partial class MainWindow : Window
 
     private void ApplySnapshot(WeatherSnapshot snapshot)
     {
-        LocationText.Text = "Москва";
+        LocationText.Text = snapshot.Location;
         UpdatedText.Text = $"Обновлено {snapshot.UpdatedAt:HH:mm}";
         TemperatureText.Text = $"{Math.Round(snapshot.TemperatureC):0}°";
         ConditionText.Text = snapshot.Condition;
         FeelsLikeText.Text = $"Ощущается как {Math.Round(snapshot.FeelsLikeC):0}°";
+        LocationMetaText.Text = $"Координаты {snapshot.Latitude:0.###}, {snapshot.Longitude:0.###}";
         WindText.Text = $"{snapshot.WindSpeed:0.#} м/с {snapshot.WindDirection}";
         HumidityText.Text = $"{snapshot.Humidity}%";
+        PressureText.Text = $"{snapshot.Pressure:0} гПа";
+        CloudText.Text = $"{snapshot.CloudCover}%";
         PrecipitationText.Text = $"{snapshot.Precipitation:0.#} мм";
-        SunTimeText.Text = snapshot.IsDay
-            ? $"закат {FormatTime(snapshot.Sunset)}"
-            : $"восход {FormatTime(snapshot.Sunrise)}";
+        FeelsLikeTileText.Text = $"{Math.Round(snapshot.FeelsLikeC):0}°";
+        SunriseText.Text = FormatTime(snapshot.Sunrise);
+        SunsetText.Text = FormatTime(snapshot.Sunset);
         StatusText.Text = "Готово.";
 
         SunOrb.Visibility = snapshot.IsDay ? Visibility.Visible : Visibility.Collapsed;
@@ -128,19 +263,19 @@ public partial class MainWindow : Window
         {
             GradientA.Color = ColorFromHex("#FF0E2940");
             GradientB.Color = ColorFromHex("#FF235882");
-            GradientC.Color = ColorFromHex("#FF11263A");
+            GradientC.Color = ColorFromHex("#FF101F32");
             SkyGlow.Fill = Brush("#40A7E8FF");
         }
         else
         {
-            GradientA.Color = ColorFromHex("#FF0B0F1F");
-            GradientB.Color = ColorFromHex("#FF20284B");
-            GradientC.Color = ColorFromHex("#FF0F1220");
-            SkyGlow.Fill = Brush("#2DADC4FF");
+            GradientA.Color = ColorFromHex("#FF090E1B");
+            GradientB.Color = ColorFromHex("#FF1B274A");
+            GradientC.Color = ColorFromHex("#FF0C1224");
+            SkyGlow.Fill = Brush("#2F9AC8FF");
         }
 
-        CloudOne.Background = Brush(snapshot.Precipitation > 0.2 ? "#E3D7E5F7" : "#D8EAF7FF");
-        CloudTwo.Background = Brush(snapshot.Precipitation > 0.2 ? "#CFCAE3F4" : "#BFE2F8FF");
+        CloudOne.Background = Brush(snapshot.Precipitation > 0.2 ? "#E1DCEE" : "#D8EAF7FF");
+        CloudTwo.Background = Brush(snapshot.Precipitation > 0.2 ? "#D3D3EE" : "#BFE2F8FF");
     }
 
     private void Card_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -178,7 +313,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var dx = _random.Next(-26, 27);
+        var dx = _random.Next(-28, 29);
         var dy = _random.Next(-8, 9);
         AnimateDouble(transform, TranslateTransform.XProperty, dx, 0, 340);
         AnimateDouble(transform, TranslateTransform.YProperty, dy, 0, 340);
@@ -187,8 +322,13 @@ public partial class MainWindow : Window
 
     private void SceneCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        var position = e.GetPosition(SceneCanvas);
-        SpawnDrop(position);
+        SpawnDrop(e.GetPosition(SceneCanvas));
+    }
+
+    private void PositionTopRight()
+    {
+        Left = SystemParameters.WorkArea.Right - Width - 24;
+        Top = SystemParameters.WorkArea.Top + 116;
     }
 
     private void BeginOpenAnimation()
@@ -197,6 +337,22 @@ public partial class MainWindow : Window
         Card.RenderTransform = new TranslateTransform(0, -18);
         AnimateDouble(Card, UIElement.OpacityProperty, 0, 1, 220);
         AnimateDouble((TranslateTransform)Card.RenderTransform, TranslateTransform.YProperty, -18, 0, 220);
+    }
+
+    private async Task CloseAnimatedAsync()
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        _closing = true;
+        var translate = Card.RenderTransform as TranslateTransform ?? new TranslateTransform();
+        Card.RenderTransform = translate;
+        AnimateDouble(Card, UIElement.OpacityProperty, 1, 0, 170);
+        AnimateDouble(translate, TranslateTransform.YProperty, 0, -12, 170);
+        await Task.Delay(180);
+        Close();
     }
 
     private void BeginAmbientAnimation()
@@ -235,10 +391,114 @@ public partial class MainWindow : Window
         drop.BeginAnimation(UIElement.OpacityProperty, fade);
     }
 
-    private void PositionTopRight()
+    private void StartInputWatcher()
     {
-        Left = SystemParameters.WorkArea.Right - Width - 24;
-        Top = SystemParameters.WorkArea.Top + 96;
+        var directory = Path.GetDirectoryName(_inputPath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(directory);
+        _inputWatcher = new FileSystemWatcher(directory, Path.GetFileName(_inputPath))
+        {
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+            EnableRaisingEvents = true
+        };
+
+        _inputWatcher.Created += InputWatcher_Changed;
+        _inputWatcher.Changed += InputWatcher_Changed;
+        _inputWatcher.Renamed += InputWatcher_Renamed;
+    }
+
+    private void InputWatcher_Changed(object sender, FileSystemEventArgs e)
+    {
+        _ = Dispatcher.InvokeAsync(async () => await ProcessPendingInputAsync());
+    }
+
+    private void InputWatcher_Renamed(object sender, RenamedEventArgs e)
+    {
+        _ = Dispatcher.InvokeAsync(async () => await ProcessPendingInputAsync());
+    }
+
+    private void LoadState()
+    {
+        if (!File.Exists(_statePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var state = JsonSerializer.Deserialize<WeatherWidgetState>(File.ReadAllText(_statePath));
+            if (state is null || string.IsNullOrWhiteSpace(state.Location))
+            {
+                return;
+            }
+
+            _selectedLocation = new WeatherLocation(state.Location, state.Latitude, state.Longitude);
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task SaveStateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_statePath))
+        {
+            return;
+        }
+
+        var state = new WeatherWidgetState
+        {
+            Location = _selectedLocation.Name,
+            Latitude = _selectedLocation.Latitude,
+            Longitude = _selectedLocation.Longitude
+        };
+
+        await File.WriteAllTextAsync(
+            _statePath,
+            JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private static WeatherInputPayload ParseInput(string raw)
+    {
+        if (!raw.StartsWith("{", StringComparison.Ordinal))
+        {
+            return new WeatherInputPayload
+            {
+                Location = raw
+            };
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<WeatherInputPayload>(raw, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            }) ?? new WeatherInputPayload { Location = raw };
+        }
+        catch
+        {
+            return new WeatherInputPayload { Location = raw };
+        }
+    }
+
+    private static string ResolveWidgetRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var depth = 0; depth < 4 && current is not null; depth++)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "widget.json")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        return AppContext.BaseDirectory;
     }
 
     private static double ReadDouble(JsonElement element, string propertyName)
@@ -253,6 +513,13 @@ public partial class MainWindow : Window
         return element.TryGetProperty(propertyName, out var value) && value.TryGetInt32(out var number)
             ? number
             : 0;
+    }
+
+    private static string ReadString(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : string.Empty;
     }
 
     private static string ReadFirstString(JsonElement element, string propertyName)
@@ -276,6 +543,7 @@ public partial class MainWindow : Window
             45 or 48 => "Туман",
             51 or 53 or 55 => "Морось",
             61 or 63 or 65 => "Дождь",
+            66 or 67 => "Ледяной дождь",
             71 or 73 or 75 => "Снег",
             80 or 81 or 82 => "Ливень",
             95 or 96 or 99 => "Гроза",
@@ -360,19 +628,76 @@ public partial class MainWindow : Window
             Convert.ToByte(hex[5..7], 16),
             Convert.ToByte(hex[7..9], 16));
     }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+        }
+    }
 }
+
+internal sealed record WeatherLocation(string Name, double? Latitude, double? Longitude);
 
 internal sealed class WeatherSnapshot
 {
+    public string Location { get; init; } = string.Empty;
+    public double Latitude { get; init; }
+    public double Longitude { get; init; }
     public double TemperatureC { get; init; }
     public double FeelsLikeC { get; init; }
     public int Humidity { get; init; }
     public double WindSpeed { get; init; }
     public string WindDirection { get; init; } = string.Empty;
+    public double Pressure { get; init; }
+    public int CloudCover { get; init; }
     public double Precipitation { get; init; }
     public string Sunrise { get; init; } = string.Empty;
     public string Sunset { get; init; } = string.Empty;
     public string Condition { get; init; } = string.Empty;
     public bool IsDay { get; init; }
     public DateTimeOffset UpdatedAt { get; init; }
+}
+
+internal sealed class WeatherInputPayload
+{
+    [JsonPropertyName("location")]
+    public string Location { get; set; } = string.Empty;
+
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = string.Empty;
+
+    [JsonPropertyName("latitude")]
+    public double? Latitude { get; set; }
+
+    [JsonPropertyName("longitude")]
+    public double? Longitude { get; set; }
+
+    [JsonPropertyName("refresh")]
+    public bool Refresh { get; set; }
+
+    [JsonPropertyName("close")]
+    public bool Close { get; set; }
+
+    [JsonPropertyName("command")]
+    public string Command { get; set; } = string.Empty;
+}
+
+internal sealed class WeatherWidgetState
+{
+    [JsonPropertyName("location")]
+    public string Location { get; set; } = string.Empty;
+
+    [JsonPropertyName("latitude")]
+    public double? Latitude { get; set; }
+
+    [JsonPropertyName("longitude")]
+    public double? Longitude { get; set; }
 }
