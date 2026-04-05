@@ -9,9 +9,13 @@
     mc:Ignorable="d">
     <Window.Resources>
         <services:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
-        <DataTemplate x:Key="ModelChoiceTemplate" x:DataType="models:ModelChoice">
-            <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="{x:Bind DisplayName}" Foreground="White" VerticalAlignment="Center" />
+        <DataTemplate x:Key="ModelChoiceTemplate">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding DisplayName}" Foreground="White" VerticalAlignment="Center" />
                 <Border
                     Grid.Column="1"
                     Margin="10,0,0,0"
@@ -19,7 +23,7 @@
                     Background="#214F3E"
                     CornerRadius="999"
                     Visibility="{Binding ShowThinkingTag, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <TextBlock Text="{x:Bind ThinkingTagText}" FontSize="11" Foreground="#DFFFE7" />
+                    <TextBlock Text="{Binding ThinkingTagText}" FontSize="11" Foreground="#DFFFE7" />
                 </Border>
             </Grid>
         </DataTemplate>
@@ -54,12 +58,12 @@
                     <TextBlock Text="Здесь только API-ключи. Базовые URL уже встроены в приложение." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
                     <ItemsControl x:Name="ProvidersList">
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="models:ProviderDescriptor">
+                            <DataTemplate>
                                 <Border Background="#131D2A" CornerRadius="22" Padding="16" Margin="0,0,0,10">
                                     <StackPanel Spacing="8">
-                                        <TextBlock Text="{x:Bind Name}" FontSize="18" Foreground="White" />
+                                        <TextBlock Text="{Binding Name}" FontSize="18" Foreground="White" />
                                         <TextBox
-                                            Tag="{x:Bind Id}"
+                                            Tag="{Binding Id}"
                                             PlaceholderText="API key"
                                             Loaded="ProviderApiKeyBox_Loaded"
                                             TextChanged="ProviderApiKeyBox_TextChanged"
@@ -88,7 +92,11 @@
                             <TextBlock Text="Добавить GGUF-модель" FontSize="18" Foreground="White" />
                             <TextBox x:Name="LocalModelNameBox" PlaceholderText="Название модели" />
                             <TextBox x:Name="LocalModelPathBox" PlaceholderText="Полный путь к .gguf" />
-                            <Grid ColumnDefinitions="*,*">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
                                 <TextBox x:Name="LocalModelContextBox" PlaceholderText="Context size, например 4096" />
                                 <TextBox x:Name="LocalModelGpuLayersBox" Grid.Column="1" Margin="10,0,0,0" PlaceholderText="GPU layers, например 0" />
                             </Grid>
@@ -99,12 +107,16 @@
 
                     <ItemsControl x:Name="LocalModelsList">
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="models:LocalModelConfig">
+                            <DataTemplate>
                                 <Border Background="#131D2A" CornerRadius="20" Padding="16" Margin="0,0,0,10">
-                                    <Grid ColumnDefinitions="*,Auto">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
                                         <StackPanel>
                                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <TextBlock Text="{x:Bind Name}" Foreground="White" FontSize="18" />
+                                            <TextBlock Text="{Binding Name}" Foreground="White" FontSize="18" />
                                                 <Border
                                                     Padding="8,2"
                                                     Background="#214F3E"
@@ -113,10 +125,10 @@
                                                     <TextBlock Text="think" FontSize="11" Foreground="#DFFFE7" />
                                                 </Border>
                                             </StackPanel>
-                                            <TextBlock Text="{x:Bind ModelPath}" Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
-                                            <TextBlock Text="{x:Bind ContextSummary}" Foreground="#8FA6BE" />
+                                            <TextBlock Text="{Binding ModelPath}" Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
+                                            <TextBlock Text="{Binding ContextSummary}" Foreground="#8FA6BE" />
                                         </StackPanel>
-                                        <Button Grid.Column="1" Margin="10,0,0,0" Content="Удалить" Click="RemoveLocalModel_Click" Tag="{x:Bind Id}" />
+                                        <Button Grid.Column="1" Margin="10,0,0,0" Content="Удалить" Click="RemoveLocalModel_Click" Tag="{Binding Id}" />
                                     </Grid>
                                 </Border>
                             </DataTemplate>
@@ -160,15 +172,20 @@
                     <TextBlock Text="Тулзы" FontSize="28" FontWeight="SemiBold" Foreground="White" />
                     <ItemsControl x:Name="ToolsList">
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="models:RuntimeItem">
+                            <DataTemplate>
                                 <Border Background="#131D2A" CornerRadius="20" Padding="16" Margin="0,0,0,10">
-                                    <Grid ColumnDefinitions="*,Auto,Auto">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
                                         <StackPanel>
-                                            <TextBlock Text="{x:Bind Name}" Foreground="White" FontSize="18" />
-                                            <TextBlock Text="{x:Bind Description}" Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
+                                            <TextBlock Text="{Binding Name}" Foreground="White" FontSize="18" />
+                                            <TextBlock Text="{Binding Description}" Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
                                         </StackPanel>
-                                        <Button Grid.Column="1" Margin="10,0,0,0" Content="Настройки" IsEnabled="{x:Bind HasSettings}" />
-                                        <Button Grid.Column="2" Margin="10,0,0,0" Content="Удалить" Click="RemoveTool_Click" Tag="{x:Bind RootPath}" />
+                                        <Button Grid.Column="1" Margin="10,0,0,0" Content="Настройки" IsEnabled="{Binding HasSettings}" />
+                                        <Button Grid.Column="2" Margin="10,0,0,0" Content="Удалить" Click="RemoveTool_Click" Tag="{Binding RootPath}" />
                                     </Grid>
                                 </Border>
                             </DataTemplate>
@@ -183,16 +200,22 @@
                     <TextBlock Text="Виджеты могут принимать данные от агента, если это указано в их манифесте." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
                     <ItemsControl x:Name="WidgetsList">
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="models:RuntimeItem">
+                            <DataTemplate>
                                 <Border Background="#131D2A" CornerRadius="20" Padding="16" Margin="0,0,0,10">
-                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
                                         <StackPanel>
-                                            <TextBlock Text="{x:Bind Name}" Foreground="White" FontSize="18" />
-                                            <TextBlock Text="{x:Bind Description}" Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
+                                            <TextBlock Text="{Binding Name}" Foreground="White" FontSize="18" />
+                                            <TextBlock Text="{Binding Description}" Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
                                         </StackPanel>
-                                        <Button Grid.Column="1" Margin="10,0,0,0" Content="Тест" Click="TestWidget_Click" Tag="{x:Bind RootPath}" />
-                                        <Button Grid.Column="2" Margin="10,0,0,0" Content="Настройки" IsEnabled="{x:Bind HasSettings}" />
-                                        <Button Grid.Column="3" Margin="10,0,0,0" Content="Удалить" Click="RemoveWidget_Click" Tag="{x:Bind RootPath}" />
+                                        <Button Grid.Column="1" Margin="10,0,0,0" Content="Тест" Click="TestWidget_Click" Tag="{Binding RootPath}" />
+                                        <Button Grid.Column="2" Margin="10,0,0,0" Content="Настройки" IsEnabled="{Binding HasSettings}" />
+                                        <Button Grid.Column="3" Margin="10,0,0,0" Content="Удалить" Click="RemoveWidget_Click" Tag="{Binding RootPath}" />
                                     </Grid>
                                 </Border>
                             </DataTemplate>
