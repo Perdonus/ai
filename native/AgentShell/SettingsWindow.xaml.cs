@@ -170,7 +170,7 @@ public sealed partial class SettingsWindow : Window
 
         if (!_isLoading)
         {
-            SyncModelSettings();
+            await SyncModelSettingsAsync();
         }
     }
 
@@ -205,7 +205,7 @@ public sealed partial class SettingsWindow : Window
     {
         await RunUiSafeAsync(async () =>
         {
-            SyncModelSettings();
+            await SyncModelSettingsAsync();
             var path = await _config.CreateBackupSnapshotAsync();
             await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Бэкап создан: {path}");
         }, "backup settings");
@@ -215,7 +215,7 @@ public sealed partial class SettingsWindow : Window
     {
         await RunUiSafeAsync(async () =>
         {
-            SyncModelSettings();
+            await SyncModelSettingsAsync();
             var path = await _config.ExportAsync();
             await EnqueueOnUiAsync(() => OperationStatusText.Text = $"Экспорт создан: {path}");
         }, "export settings");
@@ -376,7 +376,7 @@ public sealed partial class SettingsWindow : Window
     {
         if (!_isLoading)
         {
-            SyncModelSettings();
+            SyncModelSettingsOnUi();
         }
 
         await LoadModelChoicesAsync(providerCombo, modelCombo, string.Empty);
@@ -514,7 +514,7 @@ public sealed partial class SettingsWindow : Window
         await _saveLock.WaitAsync();
         try
         {
-            SyncModelSettings();
+            await SyncModelSettingsAsync();
             await _config.SaveAsync();
             await EnqueueOnUiAsync(() => OperationStatusText.Text = statusText);
         }
@@ -524,7 +524,10 @@ public sealed partial class SettingsWindow : Window
         }
     }
 
-    private void SyncModelSettings()
+    private Task SyncModelSettingsAsync()
+        => EnqueueOnUiAsync(SyncModelSettingsOnUi);
+
+    private void SyncModelSettingsOnUi()
     {
         _config.Current.LocalAi.IdleUnloadSeconds = ParseInt(LocalIdleSecondsBox.Text, 60, 10, 3600);
         _config.Current.Models.Primary = CaptureRoute(PrimaryProviderCombo, PrimaryModelCombo);
@@ -592,7 +595,7 @@ public sealed partial class SettingsWindow : Window
         args.Cancel = true;
         try
         {
-            SyncModelSettings();
+            SyncModelSettingsOnUi();
             _config.Save();
         }
         catch (Exception ex)
