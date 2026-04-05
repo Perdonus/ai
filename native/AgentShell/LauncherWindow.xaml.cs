@@ -665,8 +665,8 @@ public sealed partial class LauncherWindow : Window
             var heading = new Run { Text = lines[0] };
             var headingSpan = new Span();
             headingSpan.Inlines.Add(heading);
-            headingSpan.FontWeight = Windows.UI.Text.FontWeights.SemiBold;
-            headingSpan.FontStyle = Windows.UI.Text.FontStyle.Italic;
+            headingSpan.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+            headingSpan.FontStyle = Microsoft.UI.Text.FontStyle.Italic;
             paragraph.Inlines.Add(headingSpan);
 
             for (var index = 1; index < lines.Length; index++)
