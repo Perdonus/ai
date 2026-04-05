@@ -10,6 +10,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using IoPath = System.IO.Path;
 
 namespace WeatherOrbitWidget;
 
@@ -41,8 +42,8 @@ public partial class MainWindow : Window
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         _widgetRoot = ResolveWidgetRoot();
-        _inputPath = Path.Combine(_widgetRoot, "widget-input.json");
-        _statePath = Path.Combine(_widgetRoot, "widget-state.json");
+        _inputPath = IoPath.Combine(_widgetRoot, "widget-input.json");
+        _statePath = IoPath.Combine(_widgetRoot, "widget-state.json");
         LoadState();
         PositionTopRight();
         BeginOpenAnimation();
@@ -199,8 +200,8 @@ public partial class MainWindow : Window
         var latitude = location.Latitude ?? throw new InvalidOperationException("Latitude is required.");
         var longitude = location.Longitude ?? throw new InvalidOperationException("Longitude is required.");
         var url =
-            $"https://api.open-meteo.com/v1/forecast?latitude={latitude.Value.ToString(CultureInfo.InvariantCulture)}" +
-            $"&longitude={longitude.Value.ToString(CultureInfo.InvariantCulture)}" +
+            $"https://api.open-meteo.com/v1/forecast?latitude={latitude.ToString(CultureInfo.InvariantCulture)}" +
+            $"&longitude={longitude.ToString(CultureInfo.InvariantCulture)}" +
             "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation,is_day,pressure_msl,cloud_cover" +
             "&daily=sunrise,sunset" +
             "&forecast_days=1" +
@@ -219,8 +220,8 @@ public partial class MainWindow : Window
         return new WeatherSnapshot
         {
             Location = location.Name,
-            Latitude = latitude.Value,
-            Longitude = longitude.Value,
+            Latitude = latitude,
+            Longitude = longitude,
             TemperatureC = ReadDouble(current, "temperature_2m"),
             FeelsLikeC = ReadDouble(current, "apparent_temperature"),
             Humidity = ReadInt(current, "relative_humidity_2m"),
@@ -393,14 +394,14 @@ public partial class MainWindow : Window
 
     private void StartInputWatcher()
     {
-        var directory = Path.GetDirectoryName(_inputPath);
+        var directory = IoPath.GetDirectoryName(_inputPath);
         if (string.IsNullOrWhiteSpace(directory))
         {
             return;
         }
 
         Directory.CreateDirectory(directory);
-        _inputWatcher = new FileSystemWatcher(directory, Path.GetFileName(_inputPath))
+        _inputWatcher = new FileSystemWatcher(directory, IoPath.GetFileName(_inputPath))
         {
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
             EnableRaisingEvents = true
@@ -490,7 +491,7 @@ public partial class MainWindow : Window
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         for (var depth = 0; depth < 4 && current is not null; depth++)
         {
-            if (File.Exists(Path.Combine(current.FullName, "widget.json")))
+            if (File.Exists(IoPath.Combine(current.FullName, "widget.json")))
             {
                 return current.FullName;
             }
