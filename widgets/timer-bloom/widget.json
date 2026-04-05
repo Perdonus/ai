@@ -1,0 +1,11 @@
+{
+  "id": "timer-bloom",
+  "name": "Timer Bloom",
+  "description": "Native countdown timer widget with smooth progress and agent-driven control.",
+  "kind": "native",
+  "entry_project": "TimerBloomWidget/TimerBloomWidget.csproj",
+  "entry_executable": "dist/TimerBloomWidget.exe",
+  "accepts_data_input": true,
+  "input_hint": "Plain text can be '5m', '90s', '300'. JSON: {\"duration_seconds\":300,\"label\":\"Фокус\",\"command\":\"start|pause|reset|close\"}.",
+  "version": "0.1.0"
+}

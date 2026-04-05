@@ -1,0 +1,11 @@
+{
+  "id": "stopwatch-wave",
+  "name": "Stopwatch Wave",
+  "description": "Native stopwatch widget with lap tracking and agent control.",
+  "kind": "native",
+  "entry_project": "StopwatchWaveWidget/StopwatchWaveWidget.csproj",
+  "entry_executable": "dist/StopwatchWaveWidget.exe",
+  "accepts_data_input": true,
+  "input_hint": "JSON: {\"command\":\"start|stop|reset|lap|close\",\"label\":\"...\"}. Plain text commands start/stop/reset/lap also work.",
+  "version": "0.1.0"
+}

@@ -1,0 +1,37 @@
+{
+  "branch": "widgets",
+  "items": [
+    {
+      "id": "weather-orbit",
+      "name": "Weather Orbit",
+      "description": "Native weather widget with live metrics and an interactive sky scene.",
+      "folder": "widgets/weather-orbit",
+      "accepts_data_input": true,
+      "input_hint": "Plain text sets a weather location. JSON can pass location or coordinates."
+    },
+    {
+      "id": "note-board",
+      "name": "Note Board",
+      "description": "Native sticky note widget with editable text and agent-driven updates.",
+      "folder": "widgets/note-board",
+      "accepts_data_input": true,
+      "input_hint": "Plain text replaces the note body. JSON can set title/text and append or prepend."
+    },
+    {
+      "id": "timer-bloom",
+      "name": "Timer Bloom",
+      "description": "Native countdown timer widget with smooth progress and agent-driven control.",
+      "folder": "widgets/timer-bloom",
+      "accepts_data_input": true,
+      "input_hint": "Plain text can be a duration like 5m or 90s. JSON can set duration, label, and command."
+    },
+    {
+      "id": "stopwatch-wave",
+      "name": "Stopwatch Wave",
+      "description": "Native stopwatch widget with lap tracking and agent control.",
+      "folder": "widgets/stopwatch-wave",
+      "accepts_data_input": true,
+      "input_hint": "JSON or plain text commands can start, stop, reset, or add a lap."
+    }
+  ]
+}

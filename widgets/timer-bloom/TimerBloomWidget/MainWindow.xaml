@@ -1,0 +1,113 @@
+<Window x:Class="TimerBloomWidget.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Timer Bloom"
+        Width="368"
+        Height="308"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False">
+    <Border x:Name="Card"
+            Margin="14"
+            Padding="18"
+            CornerRadius="30"
+            BorderBrush="#22FFFFFF"
+            BorderThickness="1"
+            MouseLeftButtonDown="Card_MouseLeftButtonDown">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="28" ShadowDepth="0" Color="#B6000000" Opacity="0.42" />
+        </Border.Effect>
+        <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Offset="0" Color="#FF152A1B" />
+                <GradientStop Offset="0.52" Color="#FF1C5C2B" />
+                <GradientStop Offset="1" Color="#FF11351C" />
+            </LinearGradientBrush>
+        </Border.Background>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="LabelText"
+                           Text="Таймер"
+                           FontSize="22"
+                           FontWeight="SemiBold"
+                           Foreground="White" />
+                <Button Grid.Column="1"
+                        Width="32"
+                        Height="32"
+                        Background="#18000000"
+                        Foreground="White"
+                        BorderThickness="0"
+                        FontSize="18"
+                        FontWeight="Bold"
+                        Content="×"
+                        Click="CloseButton_Click" />
+            </Grid>
+
+            <Grid Grid.Row="1" Margin="0,16,0,0">
+                <Ellipse Width="180" Height="180" Fill="#14000000" Stroke="#2BFFFFFF" StrokeThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <Ellipse x:Name="PulseRing"
+                         Width="180"
+                         Height="180"
+                         Fill="#1E6CF59B"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"
+                         Opacity="0.22"
+                         RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <ScaleTransform />
+                    </Ellipse.RenderTransform>
+                </Ellipse>
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock x:Name="TimeText"
+                               Text="05:00"
+                               FontSize="40"
+                               FontWeight="Bold"
+                               Foreground="White"
+                               HorizontalAlignment="Center" />
+                    <TextBlock x:Name="StateText"
+                               Margin="0,8,0,0"
+                               Text="Готов к старту"
+                               Foreground="#CDE8D4"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+
+            <ProgressBar x:Name="ProgressBar"
+                         Grid.Row="2"
+                         Height="10"
+                         Margin="0,16,0,0"
+                         Minimum="0"
+                         Maximum="1"
+                         Value="0"
+                         Foreground="#FF75F3AE"
+                         Background="#19000000" />
+
+            <Grid Grid.Row="3" Margin="0,14,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Button Content="Старт" Click="StartButton_Click" />
+                <Button Grid.Column="1" Margin="8,0,0,0" Content="Пауза" Click="PauseButton_Click" />
+                <Button Grid.Column="2" Margin="8,0,0,0" Content="+1 мин" Click="PlusMinuteButton_Click" />
+                <Button Grid.Column="3" Margin="8,0,0,0" Content="Сброс" Click="ResetButton_Click" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

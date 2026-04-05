@@ -1,0 +1,8 @@
+{
+  "id": "sample-status",
+  "name": "Sample Status",
+  "description": "Minimal runtime widget example.",
+  "entry_html": "index.html",
+  "version": "0.1.0"
+}
+

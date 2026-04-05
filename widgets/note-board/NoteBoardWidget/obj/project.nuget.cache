@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "Xs/pQbuEf9M=",
+  "success": true,
+  "projectFilePath": "D:\\a\\ai\\ai\\widgets\\note-board\\NoteBoardWidget\\NoteBoardWidget.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\runneradmin\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\8.0.25\\microsoft.netcore.app.runtime.win-x64.8.0.25.nupkg.sha512",
+    "C:\\Users\\runneradmin\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\8.0.25\\microsoft.windowsdesktop.app.runtime.win-x64.8.0.25.nupkg.sha512",
+    "C:\\Users\\runneradmin\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\8.0.25\\microsoft.aspnetcore.app.runtime.win-x64.8.0.25.nupkg.sha512"
+  ],
+  "logs": []
+}
