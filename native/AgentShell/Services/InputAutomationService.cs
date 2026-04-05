@@ -238,6 +238,7 @@ public sealed class InputAutomationService
         {
             "left" => MouseeventfLeftdown,
             "right" => MouseeventfRightdown,
+            "middle" => MouseeventfMiddledown,
             _ => throw new InvalidOperationException($"Unsupported mouse button: {button}")
         };
     }
@@ -248,6 +249,7 @@ public sealed class InputAutomationService
         {
             "left" => MouseeventfLeftup,
             "right" => MouseeventfRightup,
+            "middle" => MouseeventfMiddleup,
             _ => throw new InvalidOperationException($"Unsupported mouse button: {button}")
         };
     }
@@ -306,6 +308,8 @@ public sealed class InputAutomationService
     private const uint MouseeventfLeftup = 0x0004;
     private const uint MouseeventfRightdown = 0x0008;
     private const uint MouseeventfRightup = 0x0010;
+    private const uint MouseeventfMiddledown = 0x0020;
+    private const uint MouseeventfMiddleup = 0x0040;
     private const uint MouseeventfWheel = 0x0800;
 
     [StructLayout(LayoutKind.Sequential)]

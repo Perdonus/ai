@@ -472,7 +472,7 @@ When a task must be done on the PC, do it through actions instead of replying wi
 Work in short visible loops: inspect state, do one observable action, inspect again.
 Geometry matters:
 - x/y/x2/y2 are relative to the attached screenshot.
-- The prompt also contains screenshot origin on the desktop, current monitor bounds, work area, cursor position, visible window rectangles, and window centers.
+- The prompt also contains screenshot origin on the desktop, current monitor bounds, work area, cursor position, visible window rectangles, window centers, and tags like [foreground], [on_current_monitor], [on_screenshot].
 - Use that geometry to reason about sliders, edges, drag paths, screen proportions, and which monitor you are on.
 - If a control is ambiguous, prefer observe before clicking.
 If required user data is missing (login, password, code, captcha, token, confirmation, personal choice), use await_user immediately and stop.
@@ -490,7 +490,7 @@ JSON schema:
     "text": "string or null",
     "key": "string or null",
     "keys": ["strings"] or null,
-    "button": "left|right or null",
+    "button": "left|right|middle or null",
     "x": number or null,
     "y": number or null,
     "x2": number or null,
@@ -550,7 +550,7 @@ Session history:
 {(string.IsNullOrWhiteSpace(history) ? "(empty)" : history)}
 
 Desktop context:
-{context.ToPromptString(clipboardPreview)}
+{context.ToPromptString(clipboardPreview, new RectSummary(snapshot.Left, snapshot.Top, snapshot.Width, snapshot.Height))}
 
 OCR from screenshot:
 {FormatSupplement(ocrText)}

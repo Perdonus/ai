@@ -220,7 +220,7 @@ public sealed record DesktopContextSnapshot(
     WindowSummary? ForegroundWindow,
     IReadOnlyList<WindowSummary> VisibleWindows)
 {
-    public string ToPromptString(string clipboardPreview)
+    public string ToPromptString(string clipboardPreview, RectSummary? screenshotBounds = null)
     {
         var builder = new StringBuilder();
         builder.AppendLine($"Cursor: {CursorX},{CursorY}");
@@ -230,7 +230,29 @@ public sealed record DesktopContextSnapshot(
         builder.AppendLine(
             $"Current work area: {CurrentMonitor.WorkArea.Left},{CurrentMonitor.WorkArea.Top} {CurrentMonitor.WorkArea.Width}x{CurrentMonitor.WorkArea.Height}");
         builder.AppendLine(
+            $"Current monitor center: {CurrentMonitor.Bounds.Left + (CurrentMonitor.Bounds.Width / 2)},{CurrentMonitor.Bounds.Top + (CurrentMonitor.Bounds.Height / 2)}");
+        builder.AppendLine(
             $"Cursor in current monitor: {CursorX - CurrentMonitor.Bounds.Left},{CursorY - CurrentMonitor.Bounds.Top}");
+        builder.AppendLine(
+            $"Cursor in current monitor percent: {FormatPercent(CursorX - CurrentMonitor.Bounds.Left, CurrentMonitor.Bounds.Width)}, {FormatPercent(CursorY - CurrentMonitor.Bounds.Top, CurrentMonitor.Bounds.Height)}");
+        builder.AppendLine(
+            $"Cursor in current work area: {CursorX - CurrentMonitor.WorkArea.Left},{CursorY - CurrentMonitor.WorkArea.Top}");
+        builder.AppendLine(
+            $"Cursor in current work area percent: {FormatPercent(CursorX - CurrentMonitor.WorkArea.Left, CurrentMonitor.WorkArea.Width)}, {FormatPercent(CursorY - CurrentMonitor.WorkArea.Top, CurrentMonitor.WorkArea.Height)}");
+
+        if (screenshotBounds is not null)
+        {
+            builder.AppendLine(
+                $"Screenshot bounds on desktop: {screenshotBounds.Left},{screenshotBounds.Top} {screenshotBounds.Width}x{screenshotBounds.Height}");
+            if (ContainsPoint(screenshotBounds, CursorX, CursorY))
+            {
+                builder.AppendLine(
+                    $"Cursor in screenshot: {CursorX - screenshotBounds.Left},{CursorY - screenshotBounds.Top}");
+                builder.AppendLine(
+                    $"Cursor in screenshot percent: {FormatPercent(CursorX - screenshotBounds.Left, screenshotBounds.Width)}, {FormatPercent(CursorY - screenshotBounds.Top, screenshotBounds.Height)}");
+            }
+        }
+
         builder.AppendLine($"Clipboard: {clipboardPreview}");
 
         if (ForegroundWindow is not null)
@@ -267,6 +289,22 @@ public sealed record DesktopContextSnapshot(
         for (var index = 0; index < VisibleWindows.Count; index++)
         {
             var window = VisibleWindows[index];
+            var tags = new List<string>();
+            if (ForegroundWindow is not null && SameWindow(window, ForegroundWindow))
+            {
+                tags.Add("foreground");
+            }
+
+            if (Intersects(window, CurrentMonitor.Bounds))
+            {
+                tags.Add("on_current_monitor");
+            }
+
+            if (screenshotBounds is not null && Intersects(window, screenshotBounds))
+            {
+                tags.Add("on_screenshot");
+            }
+
             builder.Append(index + 1)
                 .Append(". ")
                 .Append(window.ProcessName)
@@ -284,10 +322,67 @@ public sealed record DesktopContextSnapshot(
                 .Append(window.Left + (window.Width / 2))
                 .Append(',')
                 .Append(window.Top + (window.Height / 2))
-                .AppendLine();
+                .Append(" | current-monitor-center ")
+                .Append(window.Left + (window.Width / 2) - CurrentMonitor.Bounds.Left)
+                .Append(',')
+                .Append(window.Top + (window.Height / 2) - CurrentMonitor.Bounds.Top);
+
+            if (screenshotBounds is not null)
+            {
+                builder.Append(" | screenshot-center ")
+                    .Append(window.Left + (window.Width / 2) - screenshotBounds.Left)
+                    .Append(',')
+                    .Append(window.Top + (window.Height / 2) - screenshotBounds.Top);
+            }
+
+            if (tags.Count > 0)
+            {
+                builder.Append(" | [")
+                    .Append(string.Join(", ", tags))
+                    .Append(']');
+            }
+
+            builder.AppendLine();
         }
 
         return builder.ToString().TrimEnd();
+    }
+
+    private static bool SameWindow(WindowSummary left, WindowSummary right)
+    {
+        return string.Equals(left.Title, right.Title, StringComparison.Ordinal) &&
+               string.Equals(left.ProcessName, right.ProcessName, StringComparison.OrdinalIgnoreCase) &&
+               left.Left == right.Left &&
+               left.Top == right.Top &&
+               left.Width == right.Width &&
+               left.Height == right.Height;
+    }
+
+    private static bool ContainsPoint(RectSummary rect, int x, int y)
+    {
+        return x >= rect.Left &&
+               y >= rect.Top &&
+               x <= rect.Left + rect.Width &&
+               y <= rect.Top + rect.Height;
+    }
+
+    private static bool Intersects(WindowSummary window, RectSummary rect)
+    {
+        return window.Left < rect.Left + rect.Width &&
+               window.Left + window.Width > rect.Left &&
+               window.Top < rect.Top + rect.Height &&
+               window.Top + window.Height > rect.Top;
+    }
+
+    private static string FormatPercent(int offset, int length)
+    {
+        if (length <= 0)
+        {
+            return "0%";
+        }
+
+        var percent = (int)Math.Round(offset * 100.0 / length);
+        return $"{Math.Clamp(percent, -999, 999)}%";
     }
 }
 

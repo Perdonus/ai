@@ -317,8 +317,16 @@ public sealed class AgentChatService
                 var delay = GetRetryDelay(response, body, attempt);
                 if (response.StatusCode == HttpStatusCode.TooManyRequests)
                 {
-                    ReserveProvider(throttleKey, delay + GetRequestSpacing(throttleKey) + RateLimitSafetyPad);
-                    throw new ProviderRateLimitException(throttleKey, delay, body);
+                    var cooldown = delay + GetRequestSpacing(throttleKey) + RateLimitSafetyPad;
+                    ReserveProvider(throttleKey, cooldown);
+                    if (attempt < RetryDelays.Length)
+                    {
+                        StartupLogService.Warn(
+                            $"Provider rate-limited on {endpointLabel}. provider={throttleKey}. retry_in={cooldown.TotalSeconds:0}s. attempt={attempt + 1}");
+                        continue;
+                    }
+
+                    throw new ProviderRateLimitException(throttleKey, cooldown, body);
                 }
 
                 if (attempt < RetryDelays.Length && IsRetryable(response.StatusCode))
