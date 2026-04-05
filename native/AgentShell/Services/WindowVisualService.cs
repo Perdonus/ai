@@ -180,6 +180,23 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
     private void QueueResize(SizeInt32 targetSize, string reason)
     {
+        if (!IsLauncherVisible())
+        {
+            _resizeCts?.Cancel();
+            try
+            {
+                _appWindow.Resize(targetSize);
+                RefreshGeometry();
+                StartupLogService.Info($"Launcher resize applied immediately while hidden. reason={reason}; size={targetSize.Width}x{targetSize.Height}");
+            }
+            catch (Exception ex)
+            {
+                StartupLogService.Warn($"Hidden launcher resize failed. reason={reason}; error={ex.Message}");
+            }
+
+            return;
+        }
+
         _resizeCts?.Cancel();
         var cts = new CancellationTokenSource();
         _resizeCts = cts;
@@ -242,6 +259,12 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
     private static int Lerp(int start, int end, int step, int steps)
     {
         return start + ((end - start) * step / steps);
+    }
+
+    private bool IsLauncherVisible()
+    {
+        var hwnd = WindowNative.GetWindowHandle(_window);
+        return IsWindowVisible(hwnd);
     }
 
     private void EnsureTaskbarWindowStyle()
@@ -379,6 +402,9 @@ public sealed class WindowVisualService(Window window, FrameworkElement animated
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool ShowWindow(nint hWnd, int nCmdShow);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool IsWindowVisible(nint hWnd);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetCursorPos(out Point point);
