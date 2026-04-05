@@ -30,7 +30,7 @@ jobs:
       - name: Restore native shell
         shell: pwsh
         run: |
-          msbuild native/AgentShell/AgentShell.csproj /t:Restore /p:Configuration=Release /p:Platform=x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true *>&1 | Tee-Object -FilePath native-restore.log
+          msbuild native/AgentShell/AgentShell.csproj /t:Restore /p:Configuration=Release /p:Platform=x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true /bl:native-restore.binlog *>&1 | Tee-Object -FilePath native-restore.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build native shell
@@ -38,7 +38,7 @@ jobs:
         run: |
           $outputDir = 'native/AgentShell/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64'
           if (Test-Path $outputDir) { Remove-Item -LiteralPath $outputDir -Recurse -Force }
-          msbuild native/AgentShell/AgentShell.csproj /p:Configuration=Release /p:Platform=x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true *>&1 | Tee-Object -FilePath native-build.log
+          msbuild native/AgentShell/AgentShell.csproj /p:Configuration=Release /p:Platform=x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true /bl:native-build.binlog *>&1 | Tee-Object -FilePath native-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Bundle llama.cpp runtime
@@ -120,4 +120,6 @@ jobs:
           path: |
             native-restore.log
             native-build.log
+            native-restore.binlog
+            native-build.binlog
           if-no-files-found: warn

@@ -28,4 +28,15 @@
   <ItemGroup>
     <Content Include="Assets\app.ico" />
   </ItemGroup>
+
+  <PropertyGroup>
+    <SystemSecurityPermissionsDll>$(NuGetPackageRoot)system.security.permissions\6.0.0\lib\net6.0\System.Security.Permissions.dll</SystemSecurityPermissionsDll>
+    <WindowsAppSdkToolNet6>$(NuGetPackageRoot)microsoft.windowsappsdk\1.7.250401001\tools\net6.0\</WindowsAppSdkToolNet6>
+    <WindowsAppSdkToolNet472>$(NuGetPackageRoot)microsoft.windowsappsdk\1.7.250401001\tools\net472\</WindowsAppSdkToolNet472>
+  </PropertyGroup>
+
+  <Target Name="CopyXamlCompilerDependencies" BeforeTargets="MarkupCompilePass1" Condition="Exists('$(SystemSecurityPermissionsDll)')">
+    <Copy SourceFiles="$(SystemSecurityPermissionsDll)" DestinationFolder="$(WindowsAppSdkToolNet6)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(SystemSecurityPermissionsDll)" DestinationFolder="$(WindowsAppSdkToolNet472)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>
