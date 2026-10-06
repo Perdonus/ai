@@ -129,6 +129,7 @@ public sealed class LocalKoboldService : IDisposable
             settings.Port,
             settings.Threads,
             settings.MmprojOnCpu,
+            settings.VisionMaxRes,
             settings.ExtraArgs);
 
         lock (_gate)
@@ -317,6 +318,7 @@ public sealed record LocalRuntimePlan(
     int Port,
     int Threads,
     bool MmprojOnCpu,
+    int VisionMaxRes,
     string ExtraArgs)
 {
     public string ModelId => Path.GetFileNameWithoutExtension(ModelPath);
@@ -347,6 +349,12 @@ public sealed record LocalRuntimePlan(
         if (MmprojOnCpu)
         {
             arguments.Add("--mmprojcpu");
+        }
+
+        if (VisionMaxRes is >= 512 and <= 2048)
+        {
+            arguments.Add("--visionmaxres");
+            arguments.Add(VisionMaxRes.ToString());
         }
 
         foreach (var extra in (ExtraArgs ?? string.Empty)
@@ -390,6 +398,7 @@ public static class LocalRuntimeLocator
             gpuLayers,
             settings.QuantKv,
             settings.MmprojOnCpu,
+            settings.VisionMaxRes,
             settings.ExtraArgs);
 
         return new LocalRuntimePlan(
@@ -404,6 +413,7 @@ public static class LocalRuntimeLocator
             settings.Port,
             settings.Threads,
             settings.MmprojOnCpu,
+            settings.VisionMaxRes,
             settings.ExtraArgs);
     }
 

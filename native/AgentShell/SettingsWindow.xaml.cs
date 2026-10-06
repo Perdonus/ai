@@ -73,6 +73,7 @@ public sealed partial class SettingsWindow : Window
                 PortBox.Text = settings.Port.ToString();
                 ThreadsBox.Text = settings.Threads.ToString();
                 ImageMaxPixelsBox.Text = settings.ImageMaxPixels.ToString();
+                VisionMaxResBox.Text = settings.VisionMaxRes.ToString();
                 MaxStepsBox.Text = agent.MaxSteps.ToString();
                 IdleUnloadBox.Text = Math.Max(60, settings.IdleUnloadSeconds).ToString();
                 ExtraArgsBox.Text = settings.ExtraArgs;
@@ -336,6 +337,7 @@ public sealed partial class SettingsWindow : Window
         settings.Port = ParseInt(PortBox.Text, 5002, 1024, 65535);
         settings.Threads = ParseInt(ThreadsBox.Text, 6, 1, 64);
         settings.ImageMaxPixels = ParseInt(ImageMaxPixelsBox.Text, 1310720, 262144, 13107200);
+        settings.VisionMaxRes = ParseInt(VisionMaxResBox.Text, 1536, 512, 2048);
         settings.IdleUnloadSeconds = ParseInt(IdleUnloadBox.Text, 1800, 60, 86400);
         settings.ExtraArgs = ExtraArgsBox.Text.Trim();
         settings.MmprojOnCpu = MmprojOnCpuToggle.IsChecked == true;

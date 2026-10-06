@@ -86,6 +86,13 @@ public sealed class LocalAiSettings
     [JsonPropertyName("mmproj_on_cpu")]
     public bool MmprojOnCpu { get; set; }
 
+    /// <summary>
+    /// koboldcpp clamps MMProj input to 1024 px by default, which throws away the pixels the
+    /// screenshot was sent at and caps how small a clickable element can be. 512..2048.
+    /// </summary>
+    [JsonPropertyName("vision_max_res")]
+    public int VisionMaxRes { get; set; } = 1536;
+
     [JsonPropertyName("idle_unload_seconds")]
     public int IdleUnloadSeconds { get; set; } = 1800;
 

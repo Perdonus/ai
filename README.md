@@ -36,6 +36,10 @@ coordinates arrive on a relative `0..999` grid.
 - `--contextsize 8192` + `--quantkv q8_0` keeps the cache around **0.3 GB**
 - `--image_max_pixels 1310720` caps screenshot prefill cost, which dominates step time on
   a Polaris card
+- `vision_max_res` (default `1536`) overrides koboldcpp's own `--visionmaxres` default of
+  `1024`, which would silently throw away the detail the click accuracy depends on. Raise
+  it for precision, lower it for speed — it is part of the server cache key, so changing
+  it restarts koboldcpp
 - The `0..999` coordinate grid is resolution independent, so a downscaled screenshot does
   not shift where the agent clicks
 

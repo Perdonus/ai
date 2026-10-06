@@ -87,6 +87,7 @@
                                 <TextBox x:Name="MaxStepsBox" PlaceholderText="Максимум шагов агента, 40" />
                                 <TextBox x:Name="IdleUnloadBox" Grid.Column="1" Margin="10,0,0,0" PlaceholderText="Выгружать после простоя, сек" />
                             </Grid>
+                            <TextBox x:Name="VisionMaxResBox" PlaceholderText="Разрешение зрения, px (512–2048). Больше — точнее клик, но медленнее шаг" />
                             <TextBox x:Name="ExtraArgsBox" PlaceholderText="Дополнительные флаги koboldcpp" />
                             <CheckBox x:Name="MmprojOnCpuToggle" Content="Держать mmproj на CPU (если зрение не влезает в VRAM)" />
                             <CheckBox x:Name="OcrHintsToggle" Content="Подмешивать OCR-подсказки в промпт" />
