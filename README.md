@@ -73,6 +73,28 @@ Context budget with `context_size` 8192: system prompt about 1600 tokens, screen
 1300, notepad up to about 2000, actions a few hundred. Enabling `use_ocr_hints` adds the window
 geometry and OCR dump on top, so raise `context_size` to 12288 if you turn it on.
 
+## Web control surface
+
+The same agent is also reachable over HTTP on port 4798, so the machine can be driven from
+another device on the LAN — and later through a port forward.
+
+- Enabled by default, listens on `0.0.0.0:4798`; port and interface are editable in settings.
+- Every route needs the access token, so the settings window shows a ready-to-open URL:
+  `http://<lan-ip>:4798/?token=<token>`. A token is minted on first start.
+- The page mirrors the desktop panel: submit a task, watch live status and thinking, read the
+  answer, stop or reset. Progress arrives over Server-Sent Events, so a reload never loses
+  the transcript.
+- Built on a raw `TcpListener`, because `HttpListener` wants an admin-run urlacl reservation
+  for any non-loopback interface, and Kestrel would drag a framework reference into a
+  self-contained WinUI app.
+- Only one task may drive the desktop at a time. A second request gets a clear "busy" answer
+  instead of two agents fighting over the mouse.
+
+**Security:** the token is the only thing standing between the network and full mouse and
+keyboard control of this PC. Anyone on the LAN who learns it can do anything the agent can.
+Do not forward the port to the internet without putting TLS and real authentication in front
+of it.
+
 ## Native shell
 
 Main project:
