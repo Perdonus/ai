@@ -15,6 +15,7 @@
             <StackPanel Spacing="10">
                 <TextBlock Text="Настройки агента" FontSize="22" FontWeight="SemiBold" Foreground="White" />
                 <Button Content="Локальная модель" Click="LocalAiTabButton_Click" />
+                <Button Content="Веб-доступ" Click="WebTabButton_Click" />
                 <Button Content="Тулзы" Click="ToolsTabButton_Click" />
                 <Button Content="Виджеты" Click="WidgetsTabButton_Click" />
                 <Button Margin="0,18,0,0" Content="Сохранить" Click="SaveButton_Click" />
@@ -90,6 +91,34 @@
                             <CheckBox x:Name="MmprojOnCpuToggle" Content="Держать mmproj на CPU (если зрение не влезает в VRAM)" />
                             <CheckBox x:Name="OcrHintsToggle" Content="Подмешивать OCR-подсказки в промпт" />
                             <CheckBox x:Name="TrayRecoveryToggle" Content="При застревании фокусировать подходящее окно и открывать трей" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <ScrollViewer x:Name="WebView" Visibility="Collapsed">
+                <StackPanel Spacing="16">
+                    <TextBlock Text="Веб-доступ" FontSize="28" FontWeight="SemiBold" Foreground="White" />
+                    <TextBlock Text="Тот же агент, что и в панели, но по сети. Открой ссылку с другого устройства — там тот же чат: задача, ход мыслей, ответ, стоп. Токен даёт полный доступ к мыши и клавиатуре этой машины, так что не выставляй порт в интернет без необходимости." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
+
+                    <Border Background="#131D2A" CornerRadius="22" Padding="18">
+                        <StackPanel Spacing="12">
+                            <CheckBox x:Name="WebEnabledToggle" Content="Включить веб-морду" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="WebPortBox" PlaceholderText="Порт, например 4798" />
+                                <TextBox x:Name="WebBindBox" Grid.Column="1" Margin="10,0,0,0" PlaceholderText="Адрес прослушивания: 0.0.0.0" />
+                            </Grid>
+                            <TextBox x:Name="WebTokenBox" PlaceholderText="Токен доступа" />
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Button Content="Применить и перезапустить" Click="ApplyWebButton_Click" />
+                                <Button Content="Новый токен" Click="NewWebTokenButton_Click" />
+                                <Button Content="Открыть в браузере" Click="OpenWebButton_Click" />
+                            </StackPanel>
+                            <TextBlock x:Name="WebStatusText" Foreground="#8FA6BE" TextWrapping="WrapWholeWords" />
                         </StackPanel>
                     </Border>
                 </StackPanel>

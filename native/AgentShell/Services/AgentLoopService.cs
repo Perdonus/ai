@@ -21,7 +21,34 @@ public sealed class AgentLoopService
     private readonly RuntimeWidgetService _widgets = new();
     private readonly TesseractOcrService _ocr = new();
 
+    /// <summary>Only one task may drive the desktop at a time, whoever asked for it.</summary>
+    private static readonly SemaphoreSlim RunGate = new(1, 1);
+
     public async Task<AgentLoopResult> RunAsync(
+        ShellConfig config,
+        AgentSessionState session,
+        string prompt,
+        IProgress<AgentLoopProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (!await RunGate.WaitAsync(0, cancellationToken))
+        {
+            const string busy = "Агент уже занят другой задачей. Дождись её завершения или отмени её.";
+            StartupLogService.Warn("A second agent run was rejected because the desktop is already busy.");
+            return new AgentLoopResult(string.Empty, busy, "busy", false);
+        }
+
+        try
+        {
+            return await RunCoreAsync(config, session, prompt, progress, cancellationToken);
+        }
+        finally
+        {
+            RunGate.Release();
+        }
+    }
+
+    private async Task<AgentLoopResult> RunCoreAsync(
         ShellConfig config,
         AgentSessionState session,
         string prompt,

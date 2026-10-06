@@ -31,12 +31,30 @@ public sealed class ShellConfigService
         if (!File.Exists(NativeConfigPath))
         {
             Current = new ShellConfig();
+            EnsureWebToken();
             Save();
             return;
         }
 
         var raw = File.ReadAllText(NativeConfigPath);
         Current = JsonSerializer.Deserialize<ShellConfig>(raw, JsonOptions) ?? new ShellConfig();
+        EnsureWebToken();
+    }
+
+    /// <summary>
+    /// The web control surface must never be reachable without a secret, so a token is minted
+    /// the first time the shell starts and persisted with the rest of the config.
+    /// </summary>
+    public void EnsureWebToken()
+    {
+        if (!string.IsNullOrWhiteSpace(Current.Web.Token))
+        {
+            return;
+        }
+
+        Current.Web.Token = Guid.NewGuid().ToString("N");
+        StartupLogService.Info($"Generated a new web access token for port {Current.Web.Port}.");
+        Save();
     }
 
     public async Task SaveAsync()

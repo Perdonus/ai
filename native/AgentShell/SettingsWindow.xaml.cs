@@ -79,6 +79,13 @@ public sealed partial class SettingsWindow : Window
                 MmprojOnCpuToggle.IsChecked = settings.MmprojOnCpu;
                 OcrHintsToggle.IsChecked = agent.UseOcrHints;
                 TrayRecoveryToggle.IsChecked = agent.TrayRecovery;
+
+                var web = _config.Current.Web;
+                WebEnabledToggle.IsChecked = web.Enabled;
+                WebPortBox.Text = web.Port.ToString();
+                WebBindBox.Text = web.Bind;
+                WebTokenBox.Text = web.Token;
+                WebStatusText.Text = App.WebChat.Describe();
                 OperationStatusText.Text = string.Empty;
             });
 
@@ -113,12 +120,53 @@ public sealed partial class SettingsWindow : Window
     private void ShowTab(FrameworkElement view)
     {
         LocalAiView.Visibility = Visibility.Collapsed;
+        WebView.Visibility = Visibility.Collapsed;
         ToolsView.Visibility = Visibility.Collapsed;
         WidgetsView.Visibility = Visibility.Collapsed;
         view.Visibility = Visibility.Visible;
     }
 
     private void LocalAiTabButton_Click(object sender, RoutedEventArgs e) => ShowTab(LocalAiView);
+
+    private void WebTabButton_Click(object sender, RoutedEventArgs e)
+    {
+        ShowTab(WebView);
+        WebStatusText.Text = App.WebChat.Describe();
+    }
+
+    private async void ApplyWebButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RunUiSafeAsync(async () =>
+        {
+            await SyncSettingsAsync();
+            await _config.SaveAsync();
+            App.WebChat.Start(_config.Current);
+            await EnqueueOnUiAsync(() => WebStatusText.Text = App.WebChat.Describe());
+        }, "apply web settings");
+    }
+
+    private void NewWebTokenButton_Click(object sender, RoutedEventArgs e)
+    {
+        WebTokenBox.Text = Guid.NewGuid().ToString("N");
+        WebStatusText.Text = "Новый токен готов. Нажми «Применить и перезапустить».";
+    }
+
+    private async void OpenWebButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RunUiSafeAsync(async () =>
+        {
+            var url = App.WebChat.IsRunning
+                ? App.WebChat.ListenUrl
+                : $"http://127.0.0.1:{ParseInt(WebPortBox.Text, 4798, 1024, 65535)}/?token={WebTokenBox.Text.Trim()}";
+
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url)
+            {
+                UseShellExecute = true
+            });
+
+            await EnqueueOnUiAsync(() => WebStatusText.Text = url);
+        }, "open web surface");
+    }
 
     private void ToolsTabButton_Click(object sender, RoutedEventArgs e) => ShowTab(ToolsView);
 
@@ -295,6 +343,12 @@ public sealed partial class SettingsWindow : Window
         _config.Current.Agent.MaxSteps = ParseInt(MaxStepsBox.Text, 40, 1, 200);
         _config.Current.Agent.UseOcrHints = OcrHintsToggle.IsChecked == true;
         _config.Current.Agent.TrayRecovery = TrayRecoveryToggle.IsChecked == true;
+
+        var web = _config.Current.Web;
+        web.Enabled = WebEnabledToggle.IsChecked == true;
+        web.Port = ParseInt(WebPortBox.Text, 4798, 1024, 65535);
+        web.Bind = string.IsNullOrWhiteSpace(WebBindBox.Text) ? "0.0.0.0" : WebBindBox.Text.Trim();
+        web.Token = WebTokenBox.Text.Trim();
     }
 
     private static int ParseInt(string? raw, int fallback, int min, int max)

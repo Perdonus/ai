@@ -9,6 +9,26 @@ public sealed class ShellConfig
 
     [JsonPropertyName("agent")]
     public AgentSettings Agent { get; set; } = new();
+
+    [JsonPropertyName("web")]
+    public WebServerSettings Web { get; set; } = new();
+}
+
+public sealed class WebServerSettings
+{
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
+
+    [JsonPropertyName("port")]
+    public int Port { get; set; } = 4798;
+
+    /// <summary>Interface to listen on. 0.0.0.0 exposes the agent to the whole LAN.</summary>
+    [JsonPropertyName("bind")]
+    public string Bind { get; set; } = "0.0.0.0";
+
+    /// <summary>Required on every request. Generated on first start.</summary>
+    [JsonPropertyName("token")]
+    public string Token { get; set; } = string.Empty;
 }
 
 public sealed class AgentSettings

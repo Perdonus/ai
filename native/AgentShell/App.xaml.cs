@@ -16,6 +16,8 @@ public partial class App : Application
 
     public static LocalKoboldService LocalKobold { get; } = new();
 
+    public static WebChatService WebChat { get; } = new();
+
     public static LongTermMemoryService LongTermMemory { get; } = new();
 
     private TrayIconService? _trayIcon;
@@ -37,6 +39,16 @@ public partial class App : Application
             StartupLogService.Info("Configuration loaded.");
             LongTermMemory.EnsureLoaded();
             StartupLogService.Info("Long-term memory loaded.");
+
+            try
+            {
+                WebChat.Start(ConfigService.Current);
+                StartupLogService.Info("Web control surface started.");
+            }
+            catch (Exception ex)
+            {
+                StartupLogService.Error($"Web control surface failed to start: {ex}");
+            }
 
             Launcher = new LauncherWindow();
             StartupLogService.Info("Launcher window created.");
@@ -103,6 +115,7 @@ public partial class App : Application
             StartupLogService.Info("Exit requested from tray.");
             _trayIcon?.Dispose();
             _trayIcon = null;
+            WebChat.Dispose();
             LocalKobold.Dispose();
         }
         catch (Exception ex)
