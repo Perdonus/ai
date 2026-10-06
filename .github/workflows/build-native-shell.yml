@@ -2,7 +2,7 @@ name: build-native-shell
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "evocua-koboldcpp"]
     paths:
       - "native/**"
       - ".github/workflows/build-native-shell.yml"
@@ -41,17 +41,17 @@ jobs:
           msbuild native/AgentShell/AgentShell.csproj /p:Configuration=Release /p:Platform=x64 /p:SelfContained=true /p:WindowsAppSDKSelfContained=true /bl:native-build.binlog *>&1 | Tee-Object -FilePath native-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Bundle llama.cpp runtime
+      - name: Bundle koboldcpp runtime
         shell: pwsh
+        continue-on-error: true
         run: |
-          $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest'
-          $asset = $release.assets | Where-Object { $_.name -eq "llama-$($release.tag_name)-bin-win-cpu-x64.zip" } | Select-Object -First 1
-          if (-not $asset) { throw 'llama.cpp win-cpu-x64 asset not found.' }
-          $zip = Join-Path $env:RUNNER_TEMP 'llama.cpp.zip'
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
-          $output = 'native/AgentShell/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/runtimes/llama.cpp'
+          $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/LostRuins/koboldcpp/releases/latest'
+          $asset = $release.assets | Where-Object { $_.name -match 'nocuda.*\.exe$' } | Select-Object -First 1
+          if (-not $asset) { $asset = $release.assets | Where-Object { $_.name -match '^koboldcpp.*\.exe$' } | Select-Object -First 1 }
+          if (-not $asset) { throw 'koboldcpp asset not found.' }
+          $output = 'native/AgentShell/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/runtimes/koboldcpp'
           New-Item -ItemType Directory -Force -Path $output | Out-Null
-          Expand-Archive -LiteralPath $zip -DestinationPath $output -Force
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile (Join-Path $output $asset.name)
 
       - name: Bundle Tesseract OCR runtime
         shell: pwsh
@@ -77,7 +77,7 @@ jobs:
           Write-Host "Using publish output: $output"
 
       - name: Stage portable package branch
-        if: success()
+        if: success() && github.ref == 'refs/heads/main'
         shell: pwsh
         run: |
           $output = 'native/AgentShell/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64'
@@ -96,7 +96,7 @@ jobs:
           "@ | Set-Content -LiteralPath 'dist-app/build-info.json' -Encoding UTF8
 
       - name: Publish portable package branch
-        if: success()
+        if: success() && github.ref == 'refs/heads/main'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

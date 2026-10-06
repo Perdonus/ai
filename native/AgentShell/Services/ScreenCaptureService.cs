@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 
@@ -6,7 +7,13 @@ namespace AgentShell.Services;
 
 public sealed class ScreenCaptureService
 {
-    public ScreenSnapshot Capture()
+    /// <summary>
+    /// Captures the monitor under the cursor.
+    /// <paramref name="maxPixels"/> &gt; 0 downscales the encoded PNG to a multiple of 32 while the
+    /// snapshot keeps the real monitor geometry, so action coordinates stay in screen space.
+    /// EvoCUA answers in a relative 0..999 grid, so a smaller image does not shift the mapping.
+    /// </summary>
+    public ScreenSnapshot Capture(int maxPixels = 0)
     {
         var area = GetCaptureArea();
         var left = area.Left;
@@ -19,14 +26,75 @@ public sealed class ScreenCaptureService
         }
 
         using var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-        using var graphics = Graphics.FromImage(bitmap);
-        graphics.CopyFromScreen(left, top, 0, 0, new Size(width, height), CopyPixelOperation.SourceCopy);
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            graphics.CopyFromScreen(left, top, 0, 0, new Size(width, height), CopyPixelOperation.SourceCopy);
+        }
 
-        using var stream = new MemoryStream();
-        bitmap.Save(stream, ImageFormat.Png);
-        var base64 = Convert.ToBase64String(stream.ToArray());
-        StartupLogService.Info($"Captured screen snapshot {width}x{height} at {left},{top}.");
-        return new ScreenSnapshot(left, top, width, height, base64);
+        var sentWidth = width;
+        var sentHeight = height;
+        Bitmap? scaled = null;
+        try
+        {
+            if (maxPixels > 0 && (long)width * height > maxPixels)
+            {
+                (sentWidth, sentHeight) = QwenImageProcessor.SmartResize(width, height, maxPixels: maxPixels);
+                scaled = new Bitmap(sentWidth, sentHeight, PixelFormat.Format32bppArgb);
+                using var scaledGraphics = Graphics.FromImage(scaled);
+                scaledGraphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                scaledGraphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                scaledGraphics.DrawImage(bitmap, 0, 0, sentWidth, sentHeight);
+            }
+
+            using var stream = new MemoryStream();
+            (scaled ?? bitmap).Save(stream, ImageFormat.Png);
+            var base64 = Convert.ToBase64String(stream.ToArray());
+            StartupLogService.Info(
+                $"Captured screen snapshot {width}x{height} at {left},{top} (sent {sentWidth}x{sentHeight}, png={stream.Length / 1024} KB).");
+            return new ScreenSnapshot(left, top, width, height, base64);
+        }
+        finally
+        {
+            scaled?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Writes the captured PNG to disk so the agent can attach it as a picture and
+    /// type its path into a file dialog.
+    /// </summary>
+    public static string SaveSnapshot(ScreenSnapshot snapshot, string directory, string fileNameWithoutExtension)
+    {
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"{fileNameWithoutExtension}.png");
+        File.WriteAllBytes(path, Convert.FromBase64String(snapshot.PngBase64));
+        return path;
+    }
+
+    /// <summary>Keeps only the newest screenshot files so the folder cannot grow without bound.</summary>
+    public static void PruneOldSnapshots(string directory, int keep)
+    {
+        try
+        {
+            if (!Directory.Exists(directory) || keep <= 0)
+            {
+                return;
+            }
+
+            var stale = new DirectoryInfo(directory)
+                .GetFiles("step-*.png")
+                .OrderByDescending(file => file.LastWriteTimeUtc)
+                .Skip(keep);
+
+            foreach (var file in stale)
+            {
+                file.Delete();
+            }
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Warn($"Failed to prune screenshots: {ex.Message}");
+        }
     }
 
     private static CaptureArea GetCaptureArea()

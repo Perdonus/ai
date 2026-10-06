@@ -4,31 +4,8 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:models="using:AgentShell.Models"
-    xmlns:services="using:AgentShell.Services"
     mc:Ignorable="d">
     <Grid Background="#09111A">
-        <Grid.Resources>
-            <services:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
-            <DataTemplate x:Key="ModelChoiceTemplate">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding DisplayName}" Foreground="White" VerticalAlignment="Center" />
-                    <Border
-                        Grid.Column="1"
-                        Margin="10,0,0,0"
-                        Padding="8,2"
-                        Background="#214F3E"
-                        CornerRadius="999"
-                        Visibility="{Binding ShowThinkingTag, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <TextBlock Text="{Binding ThinkingTagText}" FontSize="11" Foreground="#DFFFE7" />
-                    </Border>
-                </Grid>
-            </DataTemplate>
-        </Grid.Resources>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="240" />
             <ColumnDefinition Width="*" />
@@ -37,9 +14,7 @@
         <Border Background="#111925" Padding="20">
             <StackPanel Spacing="10">
                 <TextBlock Text="Настройки агента" FontSize="22" FontWeight="SemiBold" Foreground="White" />
-                <Button Content="Провайдеры" Click="ProvidersTabButton_Click" />
-                <Button Content="Локальные ИИ" Click="LocalAiTabButton_Click" />
-                <Button Content="Модели" Click="ModelsTabButton_Click" />
+                <Button Content="Локальная модель" Click="LocalAiTabButton_Click" />
                 <Button Content="Тулзы" Click="ToolsTabButton_Click" />
                 <Button Content="Виджеты" Click="WidgetsTabButton_Click" />
                 <Button Margin="0,18,0,0" Content="Сохранить" Click="SaveButton_Click" />
@@ -51,116 +26,70 @@
         </Border>
 
         <Grid Grid.Column="1" Padding="26">
-            <ScrollViewer x:Name="ProvidersView" Visibility="Visible">
-                <StackPanel Spacing="14">
-                    <TextBlock Text="Провайдеры" FontSize="28" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock Text="Здесь только API-ключи. Базовые URL уже встроены в приложение." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
-                    <ItemsControl x:Name="ProvidersList">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Background="#131D2A" CornerRadius="22" Padding="16" Margin="0,0,0,10">
-                                    <StackPanel Spacing="8">
-                                        <TextBlock Text="{Binding Name}" FontSize="18" Foreground="White" />
-                                        <TextBox
-                                            Tag="{Binding Id}"
-                                            PlaceholderText="API key"
-                                            Loaded="ProviderApiKeyBox_Loaded"
-                                            TextChanged="ProviderApiKeyBox_TextChanged"
-                                            LostFocus="ProviderApiKeyBox_LostFocus" />
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
-            </ScrollViewer>
-
-            <ScrollViewer x:Name="LocalAiView" Visibility="Collapsed">
+            <ScrollViewer x:Name="LocalAiView" Visibility="Visible">
                 <StackPanel Spacing="16">
-                    <TextBlock Text="Локальные ИИ" FontSize="28" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock Text="Для встроенного local inference используется llama.cpp и GGUF-модели. Модель поднимается только по запросу и выгружается после простоя." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
+                    <TextBlock Text="Локальная модель" FontSize="28" FontWeight="SemiBold" Foreground="White" />
+                    <TextBlock Text="Агент работает только на локальной модели через koboldcpp. Все слои модели должны помещаться в видеопамять, иначе часть уедет в системную RAM и станет медленно." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
+
                     <Border Background="#131D2A" CornerRadius="22" Padding="18">
                         <StackPanel Spacing="12">
-                            <TextBlock Text="Выгружать после простоя, секунд" Foreground="White" />
-                            <TextBox x:Name="LocalIdleSecondsBox" PlaceholderText="60" LostFocus="LocalIdleSecondsBox_LostFocus" />
+                            <TextBlock Text="Что нашлось автоматически" FontSize="18" Foreground="White" />
+                            <TextBlock x:Name="DetectedPathsText" Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Button Content="Проверить запуск" Click="TestServerButton_Click" />
+                                <Button Content="Остановить" Click="StopServerButton_Click" />
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 
                     <Border Background="#131D2A" CornerRadius="22" Padding="18">
-                        <StackPanel Spacing="10">
-                            <TextBlock Text="Добавить GGUF-модель" FontSize="18" Foreground="White" />
-                            <TextBox x:Name="LocalModelNameBox" PlaceholderText="Название модели" />
-                            <TextBox x:Name="LocalModelPathBox" PlaceholderText="Полный путь к .gguf" />
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Пути (оставь пустым для автопоиска)" FontSize="18" Foreground="White" />
+                            <TextBox x:Name="KoboldPathBox" PlaceholderText="Путь к koboldcpp.exe" />
+                            <TextBox x:Name="ModelPathBox" PlaceholderText="Путь к EvoCUA .gguf" />
+                            <TextBox x:Name="MmprojPathBox" PlaceholderText="Путь к mmproj .gguf (зрение)" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Background="#131D2A" CornerRadius="22" Padding="18">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Параметры запуска" FontSize="18" Foreground="White" />
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <TextBox x:Name="LocalModelContextBox" PlaceholderText="Context size, например 4096" />
-                                <TextBox x:Name="LocalModelGpuLayersBox" Grid.Column="1" Margin="10,0,0,0" PlaceholderText="GPU layers, например 0" />
+                                <TextBox x:Name="ContextBox" PlaceholderText="Context, например 8192" />
+                                <TextBox x:Name="GpuLayersBox" Grid.Column="1" Margin="10,0,0,0" PlaceholderText="GPU слои, 999 = все" />
                             </Grid>
-                            <CheckBox x:Name="LocalModelSupportsThinkingToggle" Content="Модель поддерживает native thinking" />
-                            <Button Content="Добавить локальную модель" Click="AddLocalModel_Click" />
-                        </StackPanel>
-                    </Border>
-
-                    <ItemsControl x:Name="LocalModelsList">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Background="#131D2A" CornerRadius="20" Padding="16" Margin="0,0,0,10">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <TextBlock Text="{Binding Name}" Foreground="White" FontSize="18" />
-                                                <Border
-                                                    Padding="8,2"
-                                                    Background="#214F3E"
-                                                    CornerRadius="999"
-                                                    Visibility="{Binding SupportsThinking, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                    <TextBlock Text="think" FontSize="11" Foreground="#DFFFE7" />
-                                                </Border>
-                                            </StackPanel>
-                                            <TextBlock Text="{Binding ModelPath}" Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
-                                            <TextBlock Text="{Binding ContextSummary}" Foreground="#8FA6BE" />
-                                        </StackPanel>
-                                        <Button Grid.Column="1" Margin="10,0,0,0" Content="Удалить" Click="RemoveLocalModel_Click" Tag="{Binding Id}" />
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
-            </ScrollViewer>
-
-            <ScrollViewer x:Name="ModelsView" Visibility="Collapsed">
-                <StackPanel Spacing="16">
-                    <TextBlock Text="Модели" FontSize="28" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock Text="OCR встроен в приложение и работает через Tesseract OCR, отдельную OCR-модель выбирать не нужно." Foreground="#A8B3C4" TextWrapping="WrapWholeWords" />
-                    <Border Background="#131D2A" CornerRadius="22" Padding="18">
-                        <StackPanel Spacing="12">
-                            <TextBlock Text="Основная модель" FontSize="18" Foreground="White" />
-                            <ComboBox x:Name="PrimaryProviderCombo" SelectionChanged="PrimaryProviderCombo_SelectionChanged" />
-                            <ComboBox x:Name="PrimaryModelCombo" SelectionChanged="ModelSelectionChanged" ItemTemplate="{StaticResource ModelChoiceTemplate}" />
-                            <CheckBox x:Name="PrimaryThinkingToggle" Content="Native thinking" Checked="ModelSetting_Changed" Unchecked="ModelSetting_Changed" />
-                            <CheckBox x:Name="PrimaryMcpThinkingToggle" Content="MCP thinking" Checked="ModelSetting_Changed" Unchecked="ModelSetting_Changed" />
-
-                            <CheckBox x:Name="SeparateAnalysisToggle" Content="Использовать отдельную модель для планирования" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
-                            <StackPanel x:Name="AnalysisPanel" Spacing="10">
-                                <ComboBox x:Name="AnalysisProviderCombo" SelectionChanged="AnalysisProviderCombo_SelectionChanged" />
-                                <ComboBox x:Name="AnalysisModelCombo" SelectionChanged="ModelSelectionChanged" ItemTemplate="{StaticResource ModelChoiceTemplate}" />
-                                <CheckBox x:Name="AnalysisThinkingToggle" Content="Native thinking" Checked="ModelSetting_Changed" Unchecked="ModelSetting_Changed" />
-                                <CheckBox x:Name="AnalysisMcpThinkingToggle" Content="MCP thinking" Checked="ModelSetting_Changed" Unchecked="ModelSetting_Changed" />
-                            </StackPanel>
-
-                            <CheckBox x:Name="SeparateVisionToggle" Content="Использовать отдельную vision-модель" Checked="SeparateToggle_Changed" Unchecked="SeparateToggle_Changed" />
-                            <StackPanel x:Name="VisionPanel" Spacing="10">
-                                <ComboBox x:Name="VisionProviderCombo" SelectionChanged="VisionProviderCombo_SelectionChanged" />
-                                <ComboBox x:Name="VisionModelCombo" SelectionChanged="ModelSelectionChanged" ItemTemplate="{StaticResource ModelChoiceTemplate}" />
-                            </StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="QuantKvBox" PlaceholderText="KV квант: q8_0 / q4_0 / f16" />
+                                <TextBox x:Name="PortBox" Grid.Column="1" Margin="10,0,0,0" PlaceholderText="Порт, например 5002" />
+                            </Grid>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="ThreadsBox" PlaceholderText="Потоки CPU, например 6" />
+                                <TextBox x:Name="ImageMaxPixelsBox" Grid.Column="1" Margin="10,0,0,0" PlaceholderText="Пикселей скриншота, 1310720" />
+                            </Grid>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="MaxStepsBox" PlaceholderText="Максимум шагов агента, 40" />
+                                <TextBox x:Name="IdleUnloadBox" Grid.Column="1" Margin="10,0,0,0" PlaceholderText="Выгружать после простоя, сек" />
+                            </Grid>
+                            <TextBox x:Name="ExtraArgsBox" PlaceholderText="Дополнительные флаги koboldcpp" />
+                            <CheckBox x:Name="MmprojOnCpuToggle" Content="Держать mmproj на CPU (если зрение не влезает в VRAM)" />
+                            <CheckBox x:Name="OcrHintsToggle" Content="Подмешивать OCR-подсказки в промпт" />
+                            <CheckBox x:Name="TrayRecoveryToggle" Content="При застревании фокусировать подходящее окно и открывать трей" />
                         </StackPanel>
                     </Border>
                 </StackPanel>

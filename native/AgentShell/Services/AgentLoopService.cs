@@ -1,6 +1,4 @@
-using System.Diagnostics;
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using AgentShell.Models;
 
@@ -8,7 +6,10 @@ namespace AgentShell.Services;
 
 public sealed class AgentLoopService
 {
-    private const int MaxSteps = 12;
+    /// <summary>EvoCUA emits one short tool call per step, so a small budget is enough.</summary>
+    private const int MaxResponseTokens = 512;
+
+    private const int PreviousActionsInPrompt = 12;
 
     private readonly AgentChatService _chat = new();
     private readonly ScreenCaptureService _screen = new();
@@ -17,10 +18,8 @@ public sealed class AgentLoopService
     private readonly DesktopContextService _context = new();
     private readonly ClipboardService _clipboard = new();
     private readonly RuntimeToolService _runtimeTools = new();
-    private readonly RuntimeCatalogService _runtimeCatalog = App.RuntimeCatalog;
     private readonly RuntimeWidgetService _widgets = new();
     private readonly TesseractOcrService _ocr = new();
-    private readonly McpThinkingService _mcpThinking = new();
 
     public async Task<AgentLoopResult> RunAsync(
         ShellConfig config,
@@ -29,26 +28,27 @@ public sealed class AgentLoopService
         IProgress<AgentLoopProgress>? progress,
         CancellationToken cancellationToken)
     {
-        session.History.Add($"Пользователь: {prompt}");
-
         var memory = App.LongTermMemory;
         memory.EnsureLoaded();
         await memory.ApplyHeuristicsAsync(prompt, cancellationToken);
         var resolvedPrompt = memory.RewritePromptWithDefaults(prompt);
         var memoryPrompt = memory.BuildPrompt();
 
+        // Whatever is already on the clipboard belongs to the user, not to this task, so it
+        // becomes the baseline and never lands in the notes by accident.
+        session.LastClipboardText = TryReadClipboard();
+
+        session.History.Add($"Пользователь: {resolvedPrompt}");
+        session.RecordAction($"Instruction: {resolvedPrompt}");
+
+        var maxSteps = Math.Clamp(config.Agent.MaxSteps, 1, 200);
+        var stepDelay = Math.Clamp(config.Agent.StepDelayMs, 50, 5000);
+        var systemPrompt = EvoCuaPrompt.BuildSystemPrompt();
+
         var visibleThoughts = new StringBuilder();
         string finalAnswer = string.Empty;
-        var runtimeTools = await _runtimeTools.LoadAsync();
-        var runtimeWidgets = await _runtimeCatalog.LoadWidgetsAsync();
-        var toolPrompt = _runtimeTools.BuildToolPrompt(runtimeTools);
-        var widgetPrompt = _runtimeCatalog.BuildWidgetPrompt(runtimeWidgets);
-        var simpleOpenRequest = LooksLikeSimpleOpenRequest(resolvedPrompt);
-        var directDesktopRequest = simpleOpenRequest || LooksLikeDirectBrowserSearchRequest(resolvedPrompt);
-        var repeatedActionCount = 0;
-        var lastActionSignature = string.Empty;
 
-        if (directDesktopRequest)
+        if (LooksLikeSimpleOpenRequest(resolvedPrompt) || LooksLikeDirectBrowserSearchRequest(resolvedPrompt))
         {
             var directResult = await _desktop.TryHandleAsync(resolvedPrompt, cancellationToken);
             if (directResult is not null)
@@ -59,238 +59,383 @@ public sealed class AgentLoopService
             }
         }
 
-        for (var step = 1; step <= MaxSteps; step++)
+        var repeatedActionCount = 0;
+        var lastActionSignature = string.Empty;
+        var recoveries = 0;
+        const int maxRecoveries = 3;
+
+        // When the task names something that is already open, or hidden behind other windows,
+        // bring it forward for real instead of making the model hunt for a small taskbar icon.
+        if (!LooksLikeSimpleOpenRequest(resolvedPrompt) &&
+            await TryFocusWindowMentionedInPromptAsync(resolvedPrompt, cancellationToken))
+        {
+            AppendThought(visibleThoughts, "Сфокусировала окно, которое упомянуто в задаче.");
+        }
+
+        for (var step = 1; step <= maxSteps; step++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(new AgentLoopProgress("Смотрю на экран", visibleThoughts.ToString(), finalAnswer));
 
-            var snapshot = _screen.Capture();
-            var context = _context.Capture();
-            var clipboardPreview = _clipboard.GetPreview();
-            var ocrText = string.Empty;
-            var mcpSupplement = string.Empty;
+            var snapshot = _screen.Capture(config.LocalAi.ImageMaxPixels);
+            var screenshotPath = TrySaveSnapshot(config, snapshot, step);
+            var extraContext = await BuildExtraContextAsync(
+                config,
+                snapshot,
+                memoryPrompt,
+                session,
+                screenshotPath,
+                cancellationToken);
 
-            string analysis = string.Empty;
-            var analysisRoute = _chat.ResolveAnalysisRoute(config);
+            var userPrompt = EvoCuaPrompt.BuildUserPrompt(
+                resolvedPrompt,
+                BuildPreviousActions(session),
+                extraContext);
+
+            AgentDecision decision;
             try
             {
-                try
+                var turns = new[]
                 {
-                    progress?.Report(new AgentLoopProgress("Читаю текст на экране", visibleThoughts.ToString(), finalAnswer));
-                    ocrText = NormalizeOcrText(await _ocr.RecognizeAsync(snapshot, cancellationToken));
-                }
-                catch (Exception ex)
-                {
-                    StartupLogService.Warn($"Tesseract OCR failed: {ex.Message}");
-                    ocrText = string.Empty;
-                }
+                    new ChatTurn("system", systemPrompt),
+                    new ChatTurn("user", userPrompt, snapshot.PngBase64)
+                };
 
-                if (config.Models.PrimaryMcpThinking || config.Models.AnalysisMcpThinking)
-                {
-                    mcpSupplement = _mcpThinking.BuildSupplement(resolvedPrompt, step, context, clipboardPreview, ocrText, runtimeTools, runtimeWidgets);
-                    AppendThought(visibleThoughts, "MCP: сверила следующий ход через локальный desktop overlay.");
-                    progress?.Report(new AgentLoopProgress("Сверяю ход через MCP", visibleThoughts.ToString(), finalAnswer));
-                }
-
-                if (ShouldRunSeparateAnalysis(config, analysisRoute, step))
-                {
-                    var analysisPrompt = BuildAnalysisPrompt(
-                        session,
-                        resolvedPrompt,
-                        step,
-                        context,
-                        clipboardPreview,
-                        ocrText,
-                        memoryPrompt,
-                        config.Models.AnalysisMcpThinking ? mcpSupplement : string.Empty);
-                    analysis = await _chat.RequestTextAsync(
-                        config,
-                        analysisRoute!,
-                        "Ты внутренний анализатор desktop-агента Windows. Смотри на текущий контекст и скажи, какой один следующий шаг сейчас самый разумный. Пиши коротко, по-русски, без болтовни.",
-                        analysisPrompt,
-                        cancellationToken);
-
-                    if (_chat.ShouldShowAnalysisThinking(config))
-                    {
-                        AppendThought(visibleThoughts, analysis);
-                        progress?.Report(new AgentLoopProgress("Планирую следующий ход", visibleThoughts.ToString(), finalAnswer));
-                    }
-                }
-
-                var decision = await DecideNextActionAsync(
+                var raw = await _chat.RequestAsync(
                     config,
-                    session,
-                    resolvedPrompt,
-                    step,
-                    snapshot,
-                    context,
-                    clipboardPreview,
-                    ocrText,
-                    analysis,
-                    memoryPrompt,
-                    config.Models.PrimaryMcpThinking ? mcpSupplement : string.Empty,
-                    toolPrompt,
-                    widgetPrompt,
+                    turns,
+                    MaxResponseTokens,
                     cancellationToken);
 
-                StartupLogService.Info(
-                    $"Step {step} decision: {decision.Action.Type}; target={decision.Action.Target ?? "(none)"}; thought={TrimForLog(decision.Thought)}");
-
-                if (_chat.ShouldShowPrimaryThinking(config) && !string.IsNullOrWhiteSpace(decision.Thought))
-                {
-                    AppendThought(visibleThoughts, decision.Thought);
-                    progress?.Report(new AgentLoopProgress(string.IsNullOrWhiteSpace(decision.Thought) ? "Думаю" : decision.Thought, visibleThoughts.ToString(), finalAnswer));
-                }
-
-                if (decision.Action.Type == "await_user")
-                {
-                    finalAnswer = ResolveAwaitUserMessage(decision);
-                    session.History.Add($"Ассистент: {finalAnswer}");
-                    return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, true);
-                }
-
-                var actionSignature = BuildActionSignature(decision.Action);
-                if (actionSignature == lastActionSignature)
-                {
-                    repeatedActionCount++;
-                }
-                else
-                {
-                    lastActionSignature = actionSignature;
-                    repeatedActionCount = 1;
-                }
-
-                var repetitionLimit = decision.Action.Type is "observe" or "wait" ? 2 : 3;
-                if (repeatedActionCount >= repetitionLimit && decision.Action.Type != "finish")
-                {
-                    finalAnswer = ResolveStuckMessage(decision);
-                    session.History.Add($"Ассистент: {finalAnswer}");
-                    return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, true);
-                }
-
-                var actionSummary = await ExecuteActionAsync(decision.Action, snapshot, cancellationToken);
-                session.History.Add($"Мысль: {decision.Thought}");
-                session.History.Add($"Сделано: {actionSummary}");
-
-                if (!string.IsNullOrWhiteSpace(actionSummary))
-                {
-                    AppendThought(visibleThoughts, $"Сделала: {actionSummary}");
-                    progress?.Report(new AgentLoopProgress(actionSummary, visibleThoughts.ToString(), finalAnswer));
-                }
-
-                if (simpleOpenRequest &&
-                    decision.Action.Type == "open_app" &&
-                    !string.IsNullOrWhiteSpace(decision.Action.Target) &&
-                    await OpenedAppLooksReadyAsync(decision.Action.Target, cancellationToken))
-                {
-                    finalAnswer = $"Открыл {decision.Action.Target}.";
-                    session.History.Add($"Ассистент: {finalAnswer}");
-                    return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
-                }
-
-                if (simpleOpenRequest && decision.Action.Type is "open_browser" or "open_url" or "open_path")
-                {
-                    finalAnswer = decision.Action.Type switch
-                    {
-                        "open_browser" => string.IsNullOrWhiteSpace(decision.Action.Target)
-                            ? "Открыла браузер."
-                            : $"Открыла браузер: {decision.Action.Target}.",
-                        "open_url" => $"Открыла {decision.Action.Target}.",
-                        _ => $"Открыла {decision.Action.Target}."
-                    };
-                    session.History.Add($"Ассистент: {finalAnswer}");
-                    return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
-                }
-
-                if (decision.Action.Type == "finish")
-                {
-                    finalAnswer = string.IsNullOrWhiteSpace(decision.FinalResponse)
-                        ? "Готово."
-                        : decision.FinalResponse;
-                    session.History.Add($"Ассистент: {finalAnswer}");
-                    return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
-                }
+                decision = EvoCuaResponseParser.Parse(raw, snapshot.Width, snapshot.Height);
             }
-            catch (ProviderRateLimitException ex)
+            catch (InvalidOperationException ex)
             {
-                finalAnswer = $"Уперлась в лимит провайдера {ex.ProviderKey}. Я остановилась и не стала спамить запросы. Подожди примерно {Math.Max(1, (int)Math.Ceiling(ex.RetryAfter.TotalSeconds))} с и повтори запрос.";
+                finalAnswer = $"Локальная модель не ответила: {ex.Message}";
                 AppendThought(visibleThoughts, finalAnswer);
                 session.History.Add($"Ассистент: {finalAnswer}");
-                progress?.Report(new AgentLoopProgress("Пауза из-за лимита провайдера", visibleThoughts.ToString(), finalAnswer));
+                progress?.Report(new AgentLoopProgress("Ошибка локальной модели", visibleThoughts.ToString(), finalAnswer));
+                return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, ex.Message, false);
+            }
+
+            var action = decision.Action ?? new AgentAction { Type = "observe" };
+            StartupLogService.Info(
+                $"Step {step}/{maxSteps}: {action.Type}; target={action.Target ?? "(none)"}; x={action.X}; y={action.Y}; thought={TrimForLog(decision.Thought)}");
+
+            if (!string.IsNullOrWhiteSpace(decision.Thought))
+            {
+                AppendThought(visibleThoughts, decision.Thought);
+                progress?.Report(new AgentLoopProgress(decision.Thought, visibleThoughts.ToString(), finalAnswer));
+            }
+
+            if (action.Type == "await_user")
+            {
+                finalAnswer = ResolveAwaitUserMessage(decision);
+                session.History.Add($"Ассистент: {finalAnswer}");
+                return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, true);
+            }
+
+            var actionSignature = BuildActionSignature(action);
+            if (actionSignature == lastActionSignature)
+            {
+                repeatedActionCount++;
+            }
+            else
+            {
+                lastActionSignature = actionSignature;
+                repeatedActionCount = 1;
+            }
+
+            var repetitionLimit = action.Type is "observe" or "wait" ? 2 : 3;
+            if (repeatedActionCount >= repetitionLimit && action.Type != "finish")
+            {
+                if (recoveries < maxRecoveries)
+                {
+                    recoveries++;
+                    repeatedActionCount = 0;
+                    lastActionSignature = string.Empty;
+                    await RecoverFromStuckAsync(config, resolvedPrompt, visibleThoughts, progress, cancellationToken);
+                    continue;
+                }
+
+                finalAnswer = ResolveStuckMessage(decision);
+                session.History.Add($"Ассистент: {finalAnswer}");
+                return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, true);
+            }
+
+            var actionSummary = await ExecuteActionAsync(action, snapshot, cancellationToken);
+            CaptureClipboardIntoNotes(session);
+            session.History.Add($"Мысль: {decision.Thought}");
+            session.History.Add($"Сделано: {actionSummary}");
+            session.RecordAction($"Step {step}: {action.Type} -> {actionSummary}");
+
+            if (!string.IsNullOrWhiteSpace(actionSummary))
+            {
+                AppendThought(visibleThoughts, $"Сделала: {actionSummary}");
+                progress?.Report(new AgentLoopProgress(actionSummary, visibleThoughts.ToString(), finalAnswer));
+            }
+
+            if (action.Type == "finish")
+            {
+                finalAnswer = string.IsNullOrWhiteSpace(decision.FinalResponse)
+                    ? "Готово."
+                    : decision.FinalResponse;
+                session.History.Add($"Ассистент: {finalAnswer}");
                 return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
             }
 
-            await _input.WaitAsync(450, cancellationToken);
+            await _input.WaitAsync(stepDelay, cancellationToken);
         }
 
-        finalAnswer = "Остановилась по лимиту шагов. Если хочешь продолжить, дай уточнение или следующий запрос.";
+        finalAnswer = $"Остановилась по лимиту шагов ({maxSteps}). Если нужно продолжить, дай уточнение.";
         session.History.Add($"Ассистент: {finalAnswer}");
         return new AgentLoopResult(visibleThoughts.ToString(), finalAnswer, string.Empty, false);
     }
 
-    private async Task<AgentDecision> DecideNextActionAsync(
+    private string TryReadClipboard()
+    {
+        try
+        {
+            return _clipboard.GetText();
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Warn($"Clipboard read failed: {ex.Message}");
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// EvoCUA already knows how to select and copy. Picking that up automatically turns ctrl+c
+    /// into a scratchpad, which is what lets a long task carry text from one app into another.
+    /// </summary>
+    private void CaptureClipboardIntoNotes(AgentSessionState session)
+    {
+        var text = TryReadClipboard();
+        if (string.IsNullOrWhiteSpace(text) ||
+            string.Equals(text, session.LastClipboardText, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        session.LastClipboardText = text;
+        session.AddNote(text);
+        StartupLogService.Info($"Notepad captured {text.Length} chars from the clipboard.");
+    }
+
+    private static string? TrySaveSnapshot(ShellConfig config, ScreenSnapshot snapshot, int step)
+    {
+        try
+        {
+            var directory = string.IsNullOrWhiteSpace(config.Agent.ScreenshotDir)
+                ? Path.Combine(Path.GetTempPath(), "DesktopAIAgent", "screenshots")
+                : config.Agent.ScreenshotDir;
+
+            var path = ScreenCaptureService.SaveSnapshot(snapshot, directory, $"step-{step:000}");
+            ScreenCaptureService.PruneOldSnapshots(directory, Math.Clamp(config.Agent.KeepScreenshots, 1, 200));
+            return path;
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Warn($"Failed to save the screenshot file: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Called instead of giving up when the model repeats itself. It dismisses whatever popup
+    /// swallowed the clicks, then tries to surface the window the user talked about — which is
+    /// how a taskbar or tray window gets found reliably.
+    /// </summary>
+    private async Task RecoverFromStuckAsync(
         ShellConfig config,
-        AgentSessionState session,
         string prompt,
-        int step,
-        ScreenSnapshot snapshot,
-        DesktopContextSnapshot context,
-        string clipboardPreview,
-        string ocrText,
-        string analysis,
-        string memoryPrompt,
-        string mcpThinking,
-        string toolPrompt,
-        string widgetPrompt,
+        StringBuilder visibleThoughts,
+        IProgress<AgentLoopProgress>? progress,
         CancellationToken cancellationToken)
     {
-        var route = _chat.ResolveVisionRoute(config);
-        var systemPrompt = BuildDecisionSystemPrompt(toolPrompt, widgetPrompt, !string.IsNullOrWhiteSpace(mcpThinking));
-        var withScreenshotPrompt = BuildDecisionUserPrompt(
-            session,
-            prompt,
-            step,
-            snapshot,
-            context,
-            clipboardPreview,
-            ocrText,
-            analysis,
-            memoryPrompt,
-            mcpThinking,
-            screenshotAttached: true);
+        const string note = "Застряла на одном действии — расшевеливаю экран.";
+        StartupLogService.Warn("Recovery: repeated action detected, attempting to unstick the desktop.");
+        AppendThought(visibleThoughts, note);
+        progress?.Report(new AgentLoopProgress(note, visibleThoughts.ToString(), string.Empty));
 
-        if (_chat.CanLikelyUseImages(route))
+        _input.PressKey("ESC");
+        await _input.WaitAsync(250, cancellationToken);
+
+        if (await TryFocusWindowMentionedInPromptAsync(prompt, cancellationToken))
         {
+            AppendThought(visibleThoughts, "Сфокусировала окно, подходящее под запрос.");
+        }
+        else if (config.Agent.TrayRecovery)
+        {
+            OpenNotificationArea();
+            AppendThought(visibleThoughts, "Открыла область уведомлений, чтобы поискать свёрнутое окно.");
+        }
+
+        await _input.WaitAsync(700, cancellationToken);
+    }
+
+    private async Task<bool> TryFocusWindowMentionedInPromptAsync(string prompt, CancellationToken cancellationToken)
+    {
+        var keywords = ExtractPromptKeywords(prompt);
+        if (keywords.Count == 0)
+        {
+            return false;
+        }
+
+        IReadOnlyList<WindowSummary> windows;
+        try
+        {
+            windows = _context.Capture().VisibleWindows;
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Warn($"Window enumeration failed: {ex.Message}");
+            return false;
+        }
+
+        foreach (var keyword in keywords)
+        {
+            var match = windows.FirstOrDefault(window =>
+                !string.IsNullOrWhiteSpace(window.Title) &&
+                window.Title.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+
+            if (match is null)
+            {
+                continue;
+            }
+
+            if (await _desktop.FocusWindowAsync(match.Title, cancellationToken))
+            {
+                StartupLogService.Info($"Focused '{match.Title}' for keyword '{keyword}'.");
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static List<string> ExtractPromptKeywords(string prompt)
+    {
+        var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "зайди", "открой", "найди", "собери", "сделай", "потом", "затем", "логи", "логов",
+            "мне", "надо", "нужно", "пожалуйста", "туда", "зайти", "перейди", "отправь",
+            "open", "find", "collect", "gather", "then", "please", "logs", "from", "into"
+        };
+
+        return Regex.Matches(prompt, @"[\p{L}\p{N}]{4,}")
+            .Cast<Match>()
+            .Select(match => match.Value)
+            .Where(word => !stopWords.Contains(word))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Best effort click on the notification area chevron, which reveals the icons of apps that
+    /// were minimised to the tray. The model then sees the panel and picks the right icon itself.
+    /// </summary>
+    private void OpenNotificationArea()
+    {
+        try
+        {
+            var context = _context.Capture();
+            var monitor = context.CurrentMonitor.Bounds;
+            var virtualScreen = context.VirtualScreen;
+
+            var x = monitor.Left + monitor.Width - 125;
+            var y = virtualScreen.Top + virtualScreen.Height - 20;
+
+            _input.LeftClick(x, y);
+            StartupLogService.Info($"Recovery: clicked the notification area at {x},{y}.");
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Warn($"Notification area click failed: {ex.Message}");
+        }
+    }
+
+    private async Task<string?> BuildExtraContextAsync(
+        ShellConfig config,
+        ScreenSnapshot snapshot,
+        string memoryPrompt,
+        AgentSessionState session,
+        string? screenshotPath,
+        CancellationToken cancellationToken)
+    {
+        var parts = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(screenshotPath))
+        {
+            parts.Add(
+                $"The current screen is saved as a file at {screenshotPath} — type this exact path into a file dialog to attach it as a picture.");
+        }
+
+        parts.Add(session.Notes.Count > 0
+            ? "Text you copy with ctrl+c is collected in the notes below and stays available in every later step. Paste it with ctrl+v."
+            : "Select text and press ctrl+c to copy it: copied text is collected below and stays available in every later step.");
+
+        if (session.Notes.Count > 0)
+        {
+            parts.Add($"Collected notes:\n{session.BuildNotepad()}");
+        }
+
+        // Memory is only added once the user actually stored something, so the default
+        // prompt stays exactly in the shape EvoCUA was trained on.
+        if (!string.IsNullOrWhiteSpace(memoryPrompt))
+        {
+            parts.Add($"Long-term memory:\n{memoryPrompt.Trim()}");
+        }
+
+        if (config.Agent.UseOcrHints)
+        {
+            string ocrText = string.Empty;
             try
             {
-                var json = await _chat.RequestJsonAsync(config, route, systemPrompt, withScreenshotPrompt, snapshot, cancellationToken);
-                return ParseDecision(json);
+                ocrText = NormalizeOcrText(await _ocr.RecognizeAsync(snapshot, cancellationToken));
             }
-            catch (Exception ex) when (LooksLikeImageCapabilityFailure(ex))
+            catch (Exception ex)
             {
-                StartupLogService.Warn($"Falling back to text-only planning for {route.Provider}/{route.Model}: {ex.Message}");
+                StartupLogService.Warn($"Tesseract OCR failed: {ex.Message}");
             }
+
+            parts.Add(BuildScreenContext(snapshot, ocrText));
         }
-        else
+
+        return string.Join("\n\n", parts);
+    }
+
+    private string BuildScreenContext(ScreenSnapshot snapshot, string ocrText)
+    {
+        try
         {
-            StartupLogService.Warn($"Skipping image input for likely text-only model {route.Provider}/{route.Model}.");
+            var context = _context.Capture();
+            var geometry = context.ToPromptString(
+                _clipboard.GetPreview(),
+                new RectSummary(snapshot.Left, snapshot.Top, snapshot.Width, snapshot.Height));
+            return $"{geometry}\n\nOCR:\n{FormatSupplement(ocrText)}";
+        }
+        catch (Exception ex)
+        {
+            StartupLogService.Warn($"Desktop context failed: {ex.Message}");
+            return $"OCR:\n{FormatSupplement(ocrText)}";
+        }
+    }
+
+    private static string BuildPreviousActions(AgentSessionState session)
+    {
+        if (session.ActionLog.Count == 0)
+        {
+            return "None";
         }
 
-        var textOnlyPrompt = BuildDecisionUserPrompt(
-            session,
-            prompt,
-            step,
-            snapshot,
-            context,
-            clipboardPreview,
-            ocrText,
-            analysis,
-            memoryPrompt,
-            mcpThinking,
-            screenshotAttached: false);
+        var lines = session.ActionLog.Count <= PreviousActionsInPrompt
+            ? session.ActionLog
+            : session.ActionLog.Skip(session.ActionLog.Count - PreviousActionsInPrompt);
 
-        var fallbackJson = await _chat.RequestJsonAsync(config, route, systemPrompt, textOnlyPrompt, null, cancellationToken);
-        return ParseDecision(fallbackJson);
+        return string.Join("\n", lines);
     }
 
     private async Task<string> ExecuteActionAsync(AgentAction action, ScreenSnapshot snapshot, CancellationToken cancellationToken)
@@ -406,6 +551,20 @@ public sealed class AgentLoopService
                 }
 
                 return DescribeMouseAction("Сделала двойной клик", action);
+            case "triple_click":
+                if (action.X is not null && action.Y is not null)
+                {
+                    var point = ResolvePoint(snapshot, action.X, action.Y, "triple_click");
+                    _input.TripleClick(point.X, point.Y, NormalizeButton(action.Button));
+                }
+                else
+                {
+                    _input.Click(NormalizeButton(action.Button));
+                    _input.Click(NormalizeButton(action.Button));
+                    _input.Click(NormalizeButton(action.Button));
+                }
+
+                return DescribeMouseAction("Сделала тройной клик", action);
             case "drag":
                 {
                     var from = ResolvePoint(snapshot, action.X, action.Y, "drag");
@@ -420,6 +579,26 @@ public sealed class AgentLoopService
                         cancellationToken);
                     return $"Протащила мышь из {action.X},{action.Y} в {action.X2},{action.Y2}";
                 }
+            case "drag_to":
+                {
+                    // EvoCUA's left_click_drag drags from wherever the cursor already is.
+                    if (action.X is null || action.Y is null)
+                    {
+                        throw new InvalidOperationException("drag_to requires x and y");
+                    }
+
+                    var from = _input.GetCursorPosition();
+                    var to = ResolvePoint(snapshot, action.X, action.Y, "drag_to");
+                    await _input.DragAsync(
+                        from.X,
+                        from.Y,
+                        to.X,
+                        to.Y,
+                        action.Milliseconds ?? 450,
+                        NormalizeButton(action.Button),
+                        cancellationToken);
+                    return $"Протащила мышь в {action.X},{action.Y}";
+                }
             case "scroll":
                 MoveMouseIfNeeded(snapshot, action);
                 _input.Scroll(action.Delta ?? -120);
@@ -430,197 +609,23 @@ public sealed class AgentLoopService
                 return $"Запустила тулз {action.Target}: {toolOutput}";
             case "open_widget":
                 EnsureTarget(action, "open_widget");
-                var widgetLaunch = await _widgets.LaunchByIdAsync(action.Target!, cancellationToken);
-                return widgetLaunch;
+                return await _widgets.LaunchByIdAsync(action.Target!, cancellationToken);
             case "send_widget_data":
                 EnsureTarget(action, "send_widget_data");
                 EnsureText(action, "send_widget_data");
-                var widgetResult = await _widgets.SendDataAsync(action.Target!, action.Text!, cancellationToken);
-                return widgetResult;
+                return await _widgets.SendDataAsync(action.Target!, action.Text!, cancellationToken);
             case "remember_memory":
                 EnsureTarget(action, "remember_memory");
                 EnsureText(action, "remember_memory");
                 await App.LongTermMemory.RememberAsync(action.Target!, action.Text!, "agent", cancellationToken);
-                return $"Р—Р°РїРѕРјРЅРёР»Р° {action.Target}: {action.Text}";
+                return $"Запомнила {action.Target}: {action.Text}";
             case "forget_memory":
                 EnsureTarget(action, "forget_memory");
                 await App.LongTermMemory.ForgetAsync(action.Target!, cancellationToken);
-                return $"Р—Р°Р±С‹Р»Р° {action.Target}";
+                return $"Забыла {action.Target}";
             default:
                 throw new InvalidOperationException($"Unsupported agent action: {action.Type}");
         }
-    }
-
-    private static string BuildAnalysisPrompt(
-        AgentSessionState session,
-        string prompt,
-        int step,
-        DesktopContextSnapshot context,
-        string clipboardPreview,
-        string ocrText,
-        string memoryPrompt,
-        string mcpThinking)
-    {
-        return $"""
-Текущий запрос пользователя: {prompt}
-Номер шага: {step}
-История этой сессии:
-{string.Join("\n", session.History.TakeLast(12))}
-
-Desktop context:
-{context.ToPromptString(clipboardPreview)}
-
-OCR со скриншота:
-{FormatSupplement(ocrText)}
-
-Long-term memory:
-{FormatSupplement(memoryPrompt)}
-
-MCP thinking:
-{FormatSupplement(mcpThinking)}
-
-Дай краткую мысль о следующем одном шаге.
-""";
-    }
-
-    private static string BuildDecisionSystemPrompt(string toolPrompt, string widgetPrompt, bool mcpThinkingEnabled)
-    {
-        var mcpRule = mcpThinkingEnabled
-            ? "MCP thinking overlay is enabled for this step. Use it as extra planning signal, but still return only JSON."
-            : string.Empty;
-
-        return $$"""
-You are a Windows desktop agent on a real PC, not a normal chat bot.
-You can see screenshots, read OCR text, inspect window geometry, remember the current session, keep long-term memory, and act through mouse, keyboard, clipboard, browser, files, runtime tools, and runtime widgets.
-When a task must be done on the PC, do it through actions instead of replying with plain chat text.
-Work in short visible loops: inspect state, do one observable action, inspect again.
-Geometry matters:
-- x/y/x2/y2 are relative to the attached screenshot.
-- The prompt also contains screenshot origin on the desktop, current monitor bounds, work area, cursor position, visible window rectangles, window centers, and tags like [foreground], [on_current_monitor], [on_screenshot].
-- Use that geometry to reason about sliders, edges, drag paths, screen proportions, and which monitor you are on.
-- If a control is ambiguous, prefer observe before clicking.
-If required user data is missing (login, password, code, captcha, token, confirmation, personal choice), use await_user immediately and stop.
-If the provider is rate-limited or the task cannot continue safely, stop cleanly instead of looping.
-If a relevant widget is already installed, prefer open_widget or send_widget_data instead of pretending the widget does not exist.
-If a widget accepts data input, you may send plain text or JSON payloads exactly as the widget prompt describes.
-If the user reveals a stable preference, a default city, or any other durable fact, store it with remember_memory.
-{{mcpRule}}
-Return only one JSON object and nothing else. No markdown.
-
-JSON schema:
-{
-  "thought": "brief reasoning in Russian",
-  "action": {
-    "type": "observe|await_user|open_app|open_browser|open_url|open_path|focus_window|type_text|set_clipboard|paste_clipboard|copy_selection|press_key|key_combo|key_down|key_up|hold_key|mouse_move|mouse_down|mouse_up|mouse_hold|click|right_click|double_click|drag|scroll|wait|run_tool|open_widget|send_widget_data|remember_memory|forget_memory|finish",
-    "target": "string or null",
-    "text": "string or null",
-    "key": "string or null",
-    "keys": ["strings"] or null,
-    "button": "left|right|middle or null",
-    "x": number or null,
-    "y": number or null,
-    "x2": number or null,
-    "y2": number or null,
-    "delta": number or null,
-    "milliseconds": number or null,
-    "arguments": {"key":"value"} or null
-  },
-  "final_response": "string or null"
-}
-
-Rules:
-- Do exactly one action per step.
-- Use observe when you need to verify screen state before acting.
-- Use finish only when the desktop task is actually complete.
-- Use focus_window to switch to an already open app or document.
-- Use open_browser or open_url for browser navigation.
-- Use drag, mouse_down/mouse_up, and modifier keys for selection, drawing, slider movement, and resize gestures.
-- For browser tasks, prefer real keyboard and mouse actions after the browser is open.
-- Use remember_memory target=<stable_key> text=<stable_value> for durable user facts and preferences.
-- Use send_widget_data when the request is better solved by updating an existing widget instead of typing into some unrelated app.
-- Do not repeat the same ineffective action forever. If you are blocked, use await_user.
-- If the user asked only to open something simple and it is open, finish.
-- Think and final_response should be in Russian.
-
-Examples:
-- "Открой браузер и найди погоду" -> open_browser or open_url, then key_combo/type_text if needed, then finish.
-- "Переключись в блокнот" -> focus_window target="notepad".
-- "Открой виджет погоды" -> open_widget target="weather-orbit".
-- "Покажи погоду в Кудрово" -> open_widget target="weather-orbit", then send_widget_data target="weather-orbit" text="{\"location\":\"Кудрово\"}".
-- "Открой таймер на 5 минут" -> open_widget target="timer-bloom", then send_widget_data target="timer-bloom" text="{\"duration_seconds\":300,\"command\":\"start\"}".
-- "Создай заметку купить молоко" -> open_widget target="note-board", then send_widget_data target="note-board" text="купить молоко".
-- "Обнови данные виджета" -> send_widget_data with widget id in target and payload in text.
-
-{{toolPrompt}}
-
-{{widgetPrompt}}
-""";
-    }
-
-    private static string BuildDecisionUserPrompt(
-        AgentSessionState session,
-        string prompt,
-        int step,
-        ScreenSnapshot snapshot,
-        DesktopContextSnapshot context,
-        string clipboardPreview,
-        string ocrText,
-        string analysis,
-        string memoryPrompt,
-        string mcpThinking,
-        bool screenshotAttached)
-    {
-        var history = string.Join("\n", session.History.TakeLast(12));
-        return $"""
-Current user request: {prompt}
-Step number: {step}
-Screenshot size: {snapshot.Width}x{snapshot.Height}
-Screenshot top-left on desktop: {snapshot.Left},{snapshot.Top}
-Screenshot attached: {(screenshotAttached ? "yes" : "no")}
-
-Session history:
-{(string.IsNullOrWhiteSpace(history) ? "(empty)" : history)}
-
-Desktop context:
-{context.ToPromptString(clipboardPreview, new RectSummary(snapshot.Left, snapshot.Top, snapshot.Width, snapshot.Height))}
-
-OCR from screenshot:
-{FormatSupplement(ocrText)}
-
-Long-term memory:
-{FormatSupplement(memoryPrompt)}
-
-Extra analysis:
-{FormatSupplement(analysis)}
-
-MCP thinking:
-{FormatSupplement(mcpThinking)}
-
-Pick exactly one next step.
-""";
-    }
-
-    private static AgentDecision ParseDecision(string json)
-    {
-        var options = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true
-        };
-
-        var decision = JsonSerializer.Deserialize<AgentDecision>(json, options)
-            ?? throw new InvalidOperationException("Failed to deserialize agent decision.");
-
-        decision.Action ??= new AgentAction { Type = "observe" };
-        decision.Action = NormalizeAction(decision, decision.Action);
-        decision.Action.Arguments ??= [];
-        return decision;
-    }
-
-    private static bool LooksLikeImageCapabilityFailure(Exception exception)
-    {
-        return exception.Message.Contains("image input is not enabled", StringComparison.OrdinalIgnoreCase) ||
-               exception.Message.Contains("vision", StringComparison.OrdinalIgnoreCase) ||
-               exception.Message.Contains("multimodal", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LooksLikeSimpleOpenRequest(string prompt)
@@ -672,88 +677,12 @@ Pick exactly one next step.
         return hasBrowser && hasSearch;
     }
 
-    private static bool ShouldRunSeparateAnalysis(ShellConfig config, ModelRoute? analysisRoute, int step)
-    {
-        if (!config.Models.UseSeparateAnalysis || analysisRoute is null)
-        {
-            return false;
-        }
-
-        if (RoutesEqual(analysisRoute, config.Models.Primary))
-        {
-            return false;
-        }
-
-        return step == 1 || step % 3 == 0;
-    }
-
-    private static bool RoutesEqual(ModelRoute left, ModelRoute right)
-    {
-        return string.Equals(left.Provider, right.Provider, StringComparison.OrdinalIgnoreCase) &&
-               string.Equals(left.Model, right.Model, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private async Task<bool> OpenedAppLooksReadyAsync(string target, CancellationToken cancellationToken)
-    {
-        for (var attempt = 0; attempt < 5; attempt++)
-        {
-            if (IsAppLikelyRunning(target))
-            {
-                return true;
-            }
-
-            await _input.WaitAsync(200, cancellationToken);
-        }
-
-        return false;
-    }
-
-    private static bool IsAppLikelyRunning(string target)
-    {
-        foreach (var processName in CandidateProcessNames(target))
-        {
-            try
-            {
-                if (Process.GetProcessesByName(processName).Length > 0)
-                {
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        return false;
-    }
-
-    private static IEnumerable<string> CandidateProcessNames(string target)
-    {
-        var normalized = Path.GetFileNameWithoutExtension(target.Trim()).ToLowerInvariant();
-        return normalized switch
-        {
-            "notepad" => ["notepad"],
-            "calc" => ["CalculatorApp", "calc"],
-            "wt" => ["WindowsTerminal", "wt"],
-            "powershell" => ["powershell", "pwsh"],
-            "cmd" => ["cmd"],
-            "mspaint" => ["mspaint"],
-            "browser" => ["msedge", "chrome", "firefox", "brave"],
-            "msedge" => ["msedge"],
-            "chrome" => ["chrome"],
-            "firefox" => ["firefox"],
-            "brave" => ["brave"],
-            "explorer" => ["explorer"],
-            _ => [normalized]
-        };
-    }
-
     private static string ResolveAwaitUserMessage(AgentDecision decision)
     {
-        var message = decision.Action.Text ??
+        var message = decision.Action?.Text ??
                       decision.FinalResponse ??
-                      decision.Action.FinalResponse ??
-                      decision.Action.Target ??
+                      decision.Action?.FinalResponse ??
+                      decision.Action?.Target ??
                       decision.Thought;
 
         return string.IsNullOrWhiteSpace(message)
@@ -763,11 +692,11 @@ Pick exactly one next step.
 
     private static string ResolveStuckMessage(AgentDecision decision)
     {
-        var detail = decision.Action.Type switch
+        var detail = decision.Action?.Type switch
         {
             "observe" => "Я несколько раз подряд пыталась только наблюдать.",
             "wait" => "Я несколько раз подряд только ждала.",
-            _ => $"Я начала повторять один и тот же шаг: {decision.Action.Type}."
+            _ => $"Я начала повторять один и тот же шаг: {decision.Action?.Type}."
         };
 
         return $"{detail} Нужны уточнение, данные или следующий запрос от тебя.";
@@ -795,207 +724,6 @@ Pick exactly one next step.
             action.Delta?.ToString() ?? string.Empty,
             action.Milliseconds?.ToString() ?? string.Empty,
             arguments);
-    }
-
-    private static AgentAction NormalizeAction(AgentDecision decision, AgentAction action)
-    {
-        var originalType = action.Type;
-        action.Type = NormalizeActionType(action.Type);
-
-        if (action.Type == "open_browser")
-        {
-            action.Target = string.IsNullOrWhiteSpace(action.Target) ? "https://www.google.com" : action.Target;
-        }
-
-        if ((action.Type == "open_app" || action.Type == "focus_window" || action.Type == "open_widget" || action.Type == "run_tool") &&
-            string.IsNullOrWhiteSpace(action.Target) &&
-            !string.IsNullOrWhiteSpace(action.Text))
-        {
-            action.Target = action.Text;
-        }
-
-        if ((action.Type == "remember_memory" || action.Type == "forget_memory") &&
-            string.IsNullOrWhiteSpace(action.Target) &&
-            action.Arguments is not null &&
-            action.Arguments.TryGetValue("key", out var memoryKey) &&
-            !string.IsNullOrWhiteSpace(memoryKey))
-        {
-            action.Target = memoryKey;
-        }
-
-        if (action.Type == "remember_memory" &&
-            string.IsNullOrWhiteSpace(action.Text) &&
-            action.Arguments is not null &&
-            action.Arguments.TryGetValue("value", out var memoryValue) &&
-            !string.IsNullOrWhiteSpace(memoryValue))
-        {
-            action.Text = memoryValue;
-        }
-
-        if ((action.Type == "press_key" || action.Type == "hold_key") &&
-            string.IsNullOrWhiteSpace(action.Key) &&
-            !string.IsNullOrWhiteSpace(action.Target))
-        {
-            action.Key = action.Target;
-        }
-
-        if (action.Type == "type_text" &&
-            string.IsNullOrWhiteSpace(action.Text) &&
-            !string.IsNullOrWhiteSpace(action.Target))
-        {
-            action.Text = action.Target;
-        }
-
-        if (action.Type == "send_widget_data")
-        {
-            if (string.IsNullOrWhiteSpace(action.Target) &&
-                action.Arguments is not null &&
-                action.Arguments.TryGetValue("widget", out var widgetId) &&
-                !string.IsNullOrWhiteSpace(widgetId))
-            {
-                action.Target = widgetId;
-            }
-
-            if (string.IsNullOrWhiteSpace(action.Text) &&
-                action.Arguments is not null &&
-                action.Arguments.TryGetValue("payload", out var payload) &&
-                !string.IsNullOrWhiteSpace(payload))
-            {
-                action.Text = payload;
-            }
-        }
-
-        if (action.Type == "key_combo")
-        {
-            action.Keys = ExpandCombo(action.Keys, action.Key, action.Target);
-        }
-
-        if (string.Equals(originalType, "scroll_up", StringComparison.OrdinalIgnoreCase) && action.Delta is null)
-        {
-            action.Delta = 360;
-        }
-        else if (action.Type == "scroll" && action.Delta is null)
-        {
-            action.Delta = -360;
-        }
-
-        if (LooksLikeAwaitUser(decision, action))
-        {
-            action.Type = "await_user";
-            action.Text ??= ExtractAwaitUserText(decision);
-        }
-
-        return action;
-    }
-
-    private static string NormalizeActionType(string? rawType)
-    {
-        var normalized = string.IsNullOrWhiteSpace(rawType)
-            ? "observe"
-            : rawType.Trim().ToLowerInvariant().Replace('-', '_');
-
-        return normalized switch
-        {
-            "open_application" or "launch_app" or "launch_application" => "open_app",
-            "open_browser_tab" or "launch_browser" => "open_browser",
-            "activate_window" or "switch_window" or "focus_app" => "focus_window",
-            "launch_widget" or "show_widget" or "open_runtime_widget" => "open_widget",
-            "widget_data" or "update_widget" or "send_widget_payload" => "send_widget_data",
-            "remember" or "save_memory" or "store_memory" or "save_fact" or "memorize" => "remember_memory",
-            "forget" or "delete_memory" or "remove_memory" => "forget_memory",
-            "type" or "write_text" or "input_text" or "enter_text" => "type_text",
-            "press" or "keypress" => "press_key",
-            "shortcut" or "hotkey" or "keyboard_combo" or "press_keys" => "key_combo",
-            "ask_user" or "request_user_input" or "need_user_input" => "await_user",
-            "done" or "complete" or "completed" or "finish_task" => "finish",
-            "move_mouse" => "mouse_move",
-            "hold_mouse" => "mouse_hold",
-            "mouse_drag" or "drag_mouse" or "slide" => "drag",
-            "scroll_down" => "scroll",
-            "scroll_up" => "scroll",
-            "doubleclick" => "double_click",
-            "click_right" => "right_click",
-            "click_left" => "click",
-            _ => normalized
-        };
-    }
-
-    private static List<string>? ExpandCombo(IReadOnlyList<string>? existingKeys, string? key, string? target)
-    {
-        if (existingKeys is { Count: > 0 })
-        {
-            return existingKeys.ToList();
-        }
-
-        var source = !string.IsNullOrWhiteSpace(key) ? key : target;
-        if (string.IsNullOrWhiteSpace(source))
-        {
-            return null;
-        }
-
-        return source
-            .Split(['+', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(part => part.Trim().ToUpperInvariant())
-            .Where(part => !string.IsNullOrWhiteSpace(part))
-            .ToList();
-    }
-
-    private static bool LooksLikeAwaitUser(AgentDecision decision, AgentAction action)
-    {
-        if (action.Type == "await_user" || action.Type == "finish")
-        {
-            return false;
-        }
-
-        var signal = string.Join(
-            " ",
-            new[] { decision.Thought, decision.FinalResponse, action.Text, action.Target }
-                .Where(value => !string.IsNullOrWhiteSpace(value)))
-            .ToLowerInvariant();
-
-        if (string.IsNullOrWhiteSpace(signal))
-        {
-            return false;
-        }
-
-        if (!(action.Type is "observe" or "wait" or "run_tool"))
-        {
-            return false;
-        }
-
-        string[] markers =
-        [
-            "нужны данные",
-            "нужен логин",
-            "нужен пароль",
-            "нужен код",
-            "нужна капча",
-            "нужен api key",
-            "нужен api-key",
-            "нужен токен",
-            "нужно подтверждение",
-            "нужен выбор",
-            "введи",
-            "введите",
-            "пришли",
-            "скажи",
-            "дай мне",
-            "подтверди",
-            "подтвердите"
-        ];
-
-        return markers.Any(signal.Contains);
-    }
-
-    private static string ExtractAwaitUserText(AgentDecision decision)
-    {
-        var message = decision.FinalResponse ??
-                      decision.Action?.Text ??
-                      decision.Thought;
-
-        return string.IsNullOrWhiteSpace(message)
-            ? "Нужны данные от тебя, чтобы продолжить."
-            : message.Trim();
     }
 
     private static void EnsureTarget(AgentAction action, string actionType)
@@ -1104,11 +832,67 @@ Pick exactly one next step.
 
 public sealed class AgentSessionState
 {
+    /// <summary>Keeps the scratchpad small enough that it cannot crowd out the screenshot.</summary>
+    private const int NotepadCharLimit = 4000;
+
     public List<string> History { get; } = [];
+
+    /// <summary>Compact "Step N: action" lines fed back to the model as previous actions.</summary>
+    public List<string> ActionLog { get; } = [];
+
+    /// <summary>Text the agent copied during this task, carried across every step.</summary>
+    public List<string> Notes { get; } = [];
+
+    /// <summary>Last clipboard content seen, so the same text is not collected twice.</summary>
+    public string LastClipboardText { get; set; } = string.Empty;
+
+    public void RecordAction(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return;
+        }
+
+        ActionLog.Add(line.Trim());
+    }
+
+    public void AddNote(string text)
+    {
+        var note = text.Trim();
+        if (note.Length == 0)
+        {
+            return;
+        }
+
+        if (Notes.Any(existing => string.Equals(existing, note, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        if (note.Length > NotepadCharLimit)
+        {
+            note = note[..NotepadCharLimit];
+        }
+
+        Notes.Add(note);
+
+        while (Notes.Count > 1 && Notes.Sum(existing => existing.Length + 3) > NotepadCharLimit)
+        {
+            Notes.RemoveAt(0);
+        }
+    }
+
+    public string BuildNotepad()
+    {
+        return string.Join("\n---\n", Notes);
+    }
 
     public void Reset()
     {
         History.Clear();
+        ActionLog.Clear();
+        Notes.Clear();
+        LastClipboardText = string.Empty;
     }
 }
 

@@ -14,7 +14,7 @@ public partial class App : Application
 
     public static RuntimeCatalogService RuntimeCatalog { get; } = new();
 
-    public static LocalLlamaService LocalLlama { get; } = new();
+    public static LocalKoboldService LocalKobold { get; } = new();
 
     public static LongTermMemoryService LongTermMemory { get; } = new();
 
@@ -103,7 +103,7 @@ public partial class App : Application
             StartupLogService.Info("Exit requested from tray.");
             _trayIcon?.Dispose();
             _trayIcon = null;
-            LocalLlama.Dispose();
+            LocalKobold.Dispose();
         }
         catch (Exception ex)
         {

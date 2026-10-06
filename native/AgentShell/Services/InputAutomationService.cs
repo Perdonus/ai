@@ -88,6 +88,24 @@ public sealed class InputAutomationService
         _ = SetCursorPos(x, y);
     }
 
+    public (int X, int Y) GetCursorPosition()
+    {
+        return GetCursorPos(out var point) ? (point.X, point.Y) : (0, 0);
+    }
+
+    public void TripleClick(int x, int y, string button = "left")
+    {
+        MoveMouse(x, y);
+        for (var index = 0; index < 3; index++)
+        {
+            Click(button);
+            if (index < 2)
+            {
+                Thread.Sleep(28);
+            }
+        }
+    }
+
     public void LeftClick(int x, int y)
     {
         MoveMouse(x, y);
@@ -353,6 +371,16 @@ public sealed class InputAutomationService
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, Input[] pInputs, int cbSize);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorPoint
+    {
+        public int X;
+        public int Y;
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetCursorPos(out CursorPoint lpPoint);
 }

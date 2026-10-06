@@ -1,124 +1,79 @@
 using System.Text.Json.Serialization;
-using AgentShell.Services;
 
 namespace AgentShell.Models;
 
 public sealed class ShellConfig
 {
-    [JsonPropertyName("providers")]
-    public Dictionary<string, ProviderConfig> Providers { get; set; } = ProviderCatalog.CreateDefaultProviderConfig();
-
-    [JsonPropertyName("models")]
-    public ModelSettings Models { get; set; } = new();
-
     [JsonPropertyName("local_ai")]
     public LocalAiSettings LocalAi { get; set; } = new();
+
+    [JsonPropertyName("agent")]
+    public AgentSettings Agent { get; set; } = new();
 }
 
-public sealed class ProviderConfig
+public sealed class AgentSettings
 {
-    [JsonPropertyName("api_key")]
-    public string ApiKey { get; set; } = string.Empty;
-}
+    [JsonPropertyName("max_steps")]
+    public int MaxSteps { get; set; } = 40;
 
-public sealed class ModelSettings
-{
-    [JsonPropertyName("primary")]
-    public ModelRoute Primary { get; set; } = new("sosiskibot", string.Empty);
+    [JsonPropertyName("step_delay_ms")]
+    public int StepDelayMs { get; set; } = 700;
 
-    [JsonPropertyName("primary_thinking")]
-    public bool PrimaryThinking { get; set; }
+    [JsonPropertyName("use_ocr_hints")]
+    public bool UseOcrHints { get; set; }
 
-    [JsonPropertyName("primary_mcp_thinking")]
-    public bool PrimaryMcpThinking { get; set; }
+    /// <summary>Clicking the notification area chevron when the agent gets stuck.</summary>
+    [JsonPropertyName("tray_recovery")]
+    public bool TrayRecovery { get; set; } = true;
 
-    [JsonPropertyName("use_separate_analysis")]
-    public bool UseSeparateAnalysis { get; set; }
+    /// <summary>Where the per-step screenshot files are written. Empty means %TEMP%.</summary>
+    [JsonPropertyName("screenshot_dir")]
+    public string ScreenshotDir { get; set; } = string.Empty;
 
-    [JsonPropertyName("analysis")]
-    public ModelRoute Analysis { get; set; } = new("sosiskibot", string.Empty);
-
-    [JsonPropertyName("analysis_thinking")]
-    public bool AnalysisThinking { get; set; }
-
-    [JsonPropertyName("analysis_mcp_thinking")]
-    public bool AnalysisMcpThinking { get; set; }
-
-    [JsonPropertyName("use_separate_vision")]
-    public bool UseSeparateVision { get; set; }
-
-    [JsonPropertyName("vision")]
-    public ModelRoute Vision { get; set; } = new("sosiskibot", string.Empty);
-}
-
-public sealed class ModelRoute(string provider, string model)
-{
-    [JsonPropertyName("provider")]
-    public string Provider { get; set; } = provider;
-
-    [JsonPropertyName("model")]
-    public string Model { get; set; } = model;
-}
-
-public sealed class ProviderDescriptor(string id, string name, string baseUrl)
-{
-    public string Id { get; } = id;
-
-    public string Name { get; } = name;
-
-    public string BaseUrl { get; } = baseUrl;
-}
-
-public sealed class ModelChoice
-{
-    public string Id { get; set; } = string.Empty;
-
-    public string DisplayName { get; set; } = string.Empty;
-
-    public string ProviderId { get; set; } = string.Empty;
-
-    public bool SupportsThinking { get; set; }
-
-    public string ThinkingTagText => SupportsThinking ? "think" : string.Empty;
-
-    public bool ShowThinkingTag => SupportsThinking;
-
-    public override string ToString()
-    {
-        return DisplayName;
-    }
+    [JsonPropertyName("keep_screenshots")]
+    public int KeepScreenshots { get; set; } = 40;
 }
 
 public sealed class LocalAiSettings
 {
-    [JsonPropertyName("idle_unload_seconds")]
-    public int IdleUnloadSeconds { get; set; } = 60;
-
-    [JsonPropertyName("models")]
-    public List<LocalModelConfig> Models { get; set; } = [];
-}
-
-public sealed class LocalModelConfig
-{
-    [JsonPropertyName("id")]
-    public string Id { get; set; } = Guid.NewGuid().ToString("N");
-
-    [JsonPropertyName("name")]
-    public string Name { get; set; } = string.Empty;
+    [JsonPropertyName("koboldcpp_path")]
+    public string KoboldCppPath { get; set; } = string.Empty;
 
     [JsonPropertyName("model_path")]
     public string ModelPath { get; set; } = string.Empty;
 
+    [JsonPropertyName("mmproj_path")]
+    public string MmprojPath { get; set; } = string.Empty;
+
     [JsonPropertyName("context_size")]
-    public int ContextSize { get; set; } = 4096;
+    public int ContextSize { get; set; } = 8192;
 
     [JsonPropertyName("gpu_layers")]
-    public int GpuLayers { get; set; }
+    public int GpuLayers { get; set; } = 999;
 
-    [JsonPropertyName("supports_thinking")]
-    public bool SupportsThinking { get; set; }
+    [JsonPropertyName("quant_kv")]
+    public string QuantKv { get; set; } = "q8_0";
 
-    public string ContextSummary => $"Context: {ContextSize} · GPU layers: {GpuLayers}";
+    [JsonPropertyName("port")]
+    public int Port { get; set; } = 5002;
+
+    [JsonPropertyName("threads")]
+    public int Threads { get; set; } = 6;
+
+    [JsonPropertyName("image_max_pixels")]
+    public int ImageMaxPixels { get; set; } = 1310720;
+
+    [JsonPropertyName("mmproj_on_cpu")]
+    public bool MmprojOnCpu { get; set; }
+
+    [JsonPropertyName("idle_unload_seconds")]
+    public int IdleUnloadSeconds { get; set; } = 1800;
+
+    [JsonPropertyName("extra_args")]
+    public string ExtraArgs { get; set; } = string.Empty;
+
+    public string Summary =>
+        $"ctx {ContextSize} · gpu layers {GpuLayers} · kv {QuantKv} · port {Port}";
 }
 
 public sealed class RuntimeItem
