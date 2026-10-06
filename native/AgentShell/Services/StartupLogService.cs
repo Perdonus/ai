@@ -22,12 +22,27 @@ public static class StartupLogService
 
     private static void Write(string level, string message)
     {
-        lock (Sync)
+        try
         {
-            Directory.CreateDirectory(LogDirectory);
-            File.AppendAllText(
-                StartupLogPath,
-                $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} UTC] [{level}] {message}{Environment.NewLine}");
+            lock (Sync)
+            {
+                Directory.CreateDirectory(LogDirectory);
+                // FileShare.ReadWrite keeps a second app instance from crashing the first:
+                // both processes append to the same log concurrently.
+                using var stream = new FileStream(
+                    StartupLogPath,
+                    FileMode.Append,
+                    FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete);
+                using var writer = new StreamWriter(stream);
+                writer.WriteLine(
+                    $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} UTC] [{level}] {message}");
+            }
+        }
+        catch
+        {
+            // Logging must never take the app down, even if the file is locked or the
+            // disk is full. Drop the line instead.
         }
     }
 }

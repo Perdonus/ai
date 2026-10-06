@@ -22,6 +22,8 @@ public partial class App : Application
 
     private TrayIconService? _trayIcon;
 
+    private static Mutex? _singleInstanceMutex;
+
     public App()
     {
         StartupLogService.Initialize();
@@ -34,6 +36,15 @@ public partial class App : Application
     {
         try
         {
+            // Two instances would fight over the mouse, the hotkey and the log file.
+            _singleInstanceMutex = new Mutex(initiallyOwned: true, "Local\\AgentShell.SingleInstance", out var isFirst);
+            if (!isFirst)
+            {
+                StartupLogService.Info("Second instance detected; exiting.");
+                Environment.Exit(0);
+                return;
+            }
+
             StartupLogService.Info("OnLaunched started.");
             ConfigService.EnsureLoaded();
             StartupLogService.Info("Configuration loaded.");

@@ -65,6 +65,10 @@ public sealed class AgentLoopService
         // becomes the baseline and never lands in the notes by accident.
         session.LastClipboardText = TryReadClipboard();
 
+        // Previous actions and notes describe THIS task only. Carrying steps from an older
+        // task into the prompt made the model replay them instead of doing the new job.
+        session.ActionLog.Clear();
+        session.Notes.Clear();
         session.History.Add($"Пользователь: {resolvedPrompt}");
         session.RecordAction($"Instruction: {resolvedPrompt}");
 
@@ -134,6 +138,7 @@ public sealed class AgentLoopService
                     MaxResponseTokens,
                     cancellationToken);
 
+                StartupLogService.Info($"EvoCUA raw: {TrimForLog(raw, 500)}");
                 decision = EvoCuaResponseParser.Parse(raw, snapshot.Width, snapshot.Height);
             }
             catch (InvalidOperationException ex)
@@ -396,17 +401,16 @@ public sealed class AgentLoopService
 
         if (!string.IsNullOrWhiteSpace(screenshotPath))
         {
-            parts.Add(
-                $"The current screen is saved as a file at {screenshotPath} — type this exact path into a file dialog to attach it as a picture.");
+            // Phrased as reference data, never as an instruction: an 8B model will obey a
+            // stray imperative here instead of the actual task.
+            parts.Add($"Reference: this screen is saved as a file at {screenshotPath}");
         }
 
-        parts.Add(session.Notes.Count > 0
-            ? "Text you copy with ctrl+c is collected in the notes below and stays available in every later step. Paste it with ctrl+v."
-            : "Select text and press ctrl+c to copy it: copied text is collected below and stays available in every later step.");
-
+        // No coaching sentences about ctrl+c here. Telling the model to "select text and
+        // press ctrl+c" made it copy and paste instead of doing the task.
         if (session.Notes.Count > 0)
         {
-            parts.Add($"Collected notes:\n{session.BuildNotepad()}");
+            parts.Add($"Collected notes (reference data):\n{session.BuildNotepad()}");
         }
 
         // Memory is only added once the user actually stored something, so the default
@@ -810,7 +814,7 @@ public sealed class AgentLoopService
             : verb;
     }
 
-    private static string TrimForLog(string text)
+    private static string TrimForLog(string text, int maxLength = 220)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -818,7 +822,7 @@ public sealed class AgentLoopService
         }
 
         var singleLine = text.Replace("\r", " ").Replace("\n", " ").Trim();
-        return singleLine.Length <= 220 ? singleLine : $"{singleLine[..220]}...";
+        return singleLine.Length <= maxLength ? singleLine : $"{singleLine[..maxLength]}...";
     }
 
     private static void AppendThought(StringBuilder builder, string line)
